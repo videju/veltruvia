@@ -7,7 +7,7 @@
 
 import { app, BrowserWindow, shell, ipcMain, Menu, dialog } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, extname } from 'node:path';
+import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 import { chdir } from 'node:process';
 
 // Fix Windows sandbox/GPU crash on Electron 33
@@ -69,7 +69,8 @@ function serveStatic(req, res) {
   }
   if (pathname === '/') pathname = '/index.html';
   const filePath = join(PUBLIC, pathname);
-  if (!filePath.startsWith(PUBLIC)) { res.writeHead(403); res.end('Forbidden'); return; }
+  const rel = relative(PUBLIC, filePath);
+  if (rel.startsWith('..') || isAbsolute(rel)) { res.writeHead(403); res.end('Forbidden'); return; }
   if (!existsSync(filePath) || !statSync(filePath).isFile()) {
     if (expressApp) { expressApp(req, res); return; }
     const fallback = join(PUBLIC, 'index.html');

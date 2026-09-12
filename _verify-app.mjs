@@ -8,7 +8,10 @@ const appDir = process.argv[2];
 const appName = process.argv[3] || appDir;
 const port = 3000;
 const base = `http://localhost:${port}`;
-const dbPath = join(appDir, 'test-verify.db');for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password'), join(appDir, 'patient-store.json')]) { try { rmSync(f); } catch {} }
+const dbPath = join(appDir, 'test-verify.db');const runtimeFiles = ['.demo-admin-password', 'patient-store.json', 'appointments-store.json',
+  'availability-store.json', 'logs-store.json', 'messages-store.json',
+  'telehealth-rooms.json', 'telehealth-signals.json'].map(f => join(appDir, f));
+for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', ...runtimeFiles]) { try { rmSync(f); } catch {} }
 const server = spawn('node', ['src/server.js'], {
   cwd: appDir,
   env: {
@@ -92,6 +95,7 @@ r = await api('POST', '/api/auth/login', { email: 'test@example.com', password: 
 const cookie = extractCookie(r.setCookie);
 r = await api('POST', '/api/sync/store-login', { mrn: '12345', password: 'testpat123' });
 check('Patient store login', r.data?.ok === true);
+const patCookie = extractCookie(r.setCookie);
 r = await api('POST', '/api/sync/lab-store-login', { username: 'testlab', password: 'testlab123' });
 check('Lab store login', r.data?.ok === true);
 
@@ -144,6 +148,45 @@ r = await api('GET', '/api/telehealth/rooms', null, cookie);
 check('List rooms', r.data?.rooms?.length > 0);
 r = await api('POST', `/api/telehealth/rooms/${roomCode}/end`, null, cookie);
 check('End room', r.data?.ok === true);
+
+// ── TELEHEALTH AUTH (sync/th endpoints) ──
+console.log('\n📹 Telehealth security');
+r = await api('POST', '/api/sync/th/create-room', { patientMrn: '12345', doctorId: 'test-admin-doc' }, cookie);
+check('Doctor creates th room', r.data?.ok === true && !!r.data?.roomCode);
+const thCode = r.data?.roomCode;
+r = await api('GET', `/api/sync/th/my-rooms/test-admin-doc/12345`, null, patCookie);
+check('Patient sees own th room', r.data?.ok === true && r.data?.rooms?.some(x => x.id === thCode));
+r = await api('GET', `/api/sync/th/my-rooms/test-admin-doc/99999`, null, patCookie);
+check('Patient blocked from other MRN rooms (403)', r.status === 403);
+r = await api('GET', `/api/sync/th/rooms/test-admin-doc`, null, null);
+check('Unauthenticated room listing rejected (401)', r.status === 401);
+r = await api('POST', '/api/sync/th/join-room', { roomCode: thCode }, patCookie);
+check('Patient joins own room', r.data?.ok === true);
+r = await api('POST', '/api/sync/th/signal', { roomCode: thCode, type: 'offer', data: { sdp: 'x' }, sender: 'patient' }, patCookie);
+check('Signal post (participant)', r.data?.ok === true);
+r = await api('GET', `/api/sync/th/signal/${thCode}?timeout=100`, null, null);
+check('Unauthenticated signal read rejected (401)', r.status === 401);
+r = await api('POST', '/api/sync/th/end-room', { roomCode: thCode }, cookie);
+check('Doctor ends th room', r.data?.ok === true);
+
+// ── FILE-STORE ROUTE SECURITY ──
+console.log('\n🔒 File-store security');
+r = await api('POST', '/api/sync/save-patient', { mrn: 'SECTEST1', patient: { name: 'Sec Test', dob: '2000-01-01', diag: 'x', docId: 'test-admin-doc', pass: 'pw12345678' } }, cookie);
+check('Doctor saves patient (auth)', r.data?.ok === true);
+r = await api('POST', '/api/sync/save-patient', { mrn: 'SECTEST2', patient: { name: 'Anon', dob: '2000-01-01', docId: 'x', pass: 'pw12345678' } }, null);
+check('Unauthenticated save-patient rejected (401)', r.status === 401);
+r = await api('GET', '/api/sync/get-appointments/12345', null, patCookie);
+check('Patient reads own appointments', r.data?.ok === true);
+r = await api('GET', '/api/sync/get-appointments/99999', null, patCookie);
+check('Patient blocked from other MRN appointments (403)', r.status === 403);
+r = await api('GET', '/api/sync/get-messages/test-admin-doc/12345', null, null);
+check('Unauthenticated message read rejected (401)', r.status === 401);
+r = await api('POST', '/api/sync/send-message', { mrn: '12345', docId: 'test-admin-doc', role: 'patient', text: 'hi' }, patCookie);
+check('Patient sends message to own thread', r.data?.ok === true);
+r = await api('POST', '/api/sync/delete-patient', { mrn: 'SECTEST1' }, patCookie);
+check('Patient cannot delete patient records (403)', r.status === 403);
+r = await api('POST', '/api/sync/delete-patient', { mrn: 'SECTEST1' }, cookie);
+check('Doctor deletes patient record', r.data?.ok === true);
 
 // ── BILLING ──
 console.log('\n💰 Billing');
@@ -215,5 +258,8 @@ console.log(`══════════════════════�
 server.kill();
 await new Promise(r => setTimeout(r, 800));
 try { server.kill('SIGKILL'); } catch {}
-for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password'), join(appDir, 'patient-store.json')]) { try { rmSync(f); } catch {} }
+const runtimeFiles = ['.demo-admin-password', 'patient-store.json', 'appointments-store.json',
+  'availability-store.json', 'logs-store.json', 'messages-store.json',
+  'telehealth-rooms.json', 'telehealth-signals.json'].map(f => join(appDir, f));
+for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', ...runtimeFiles]) { try { rmSync(f); } catch {} }
 process.exit(fail > 0 ? 1 : 0);

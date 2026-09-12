@@ -180,6 +180,24 @@ function patientOwnsKey(k, mrn) {
     || k.startsWith('factbr_' + mrn);
 }
 
+// MRN-scoped access control for the shared JSON-store endpoints.
+// Doctors/admins may touch any record; a session patient may only touch
+// records whose MRN matches their own session; unauthenticated callers are
+// rejected. Guards every route that reads or writes PHI by MRN parameter.
+async function requireMrnAccess(req, res, mrn) {
+  if (res.headersSent) return false;
+  if (!req.auth) { res.status(401).json({ error: 'Not authenticated' }); return false; }
+  if (['doctor', 'admin'].includes(req.auth.role)) return true;
+  if (req.auth.role === 'kv-patient') {
+    const sessionMrn = String(req.auth.subjectId).split('::')[1];
+    if (sessionMrn && sessionMrn === mrn) return true;
+    res.status(403).json({ error: 'Not your patient record' });
+    return false;
+  }
+  res.status(403).json({ error: 'Insufficient permissions' });
+  return false;
+}
+
 // Everything the patient app needs: their own keys, plus the owning doctor's
 // profile with credentials stripped.
 async function collectPatientKeys(ownerId, mrn) {
@@ -774,10 +792,8 @@ const saveAvailabilitySchema = z.object({
   })).max(50),
 });
 
-// Doctor: save patient to shared JSON store
-// In Electron mode (standalone desktop), auth is optional — allows saving even
-// when the doctor registered offline and has no server session.
-syncRouter.post('/save-patient', validate(savePatientSchema), asyncHandler(async (req, res) => {
+// Doctor: save patient to shared JSON store (authenticated — writes credentials)
+syncRouter.post('/save-patient', authenticate, validate(savePatientSchema), asyncHandler(async (req, res) => {
   const { mrn, patient } = req.valid;
   const store = readPatientStore();
   store[mrn] = { ...patient, mrn, _ownerId: req.auth?.subjectId || patient.docId || 'local', _savedAt: new Date().toISOString() };
@@ -792,8 +808,8 @@ syncRouter.post('/save-patient', validate(savePatientSchema), asyncHandler(async
   }
 }));
 
-// Doctor: delete patient from shared JSON store
-syncRouter.post('/delete-patient', validate(deletePatientSchema), asyncHandler(async (req, res) => {
+// Doctor: delete patient from shared JSON store (doctor/admin only)
+syncRouter.post('/delete-patient', authenticate, requireRole('doctor', 'admin'), validate(deletePatientSchema), asyncHandler(async (req, res) => {
   const { mrn } = req.valid;
   const store = readPatientStore();
   delete store[mrn];
@@ -815,6 +831,10 @@ syncRouter.post('/store-login', loginLimiter, validate(storeLoginSchema), asyncH
   }
 
   if (!authOk) return res.status(401).json({ error: 'Invalid MRN or password' });
+
+  // Issue a real session (mirrors /patient-login) so authenticated endpoints
+  // like /sync/patient and the telehealth routes work for store-based accounts.
+  await createSession(res, { subjectId: `${pat.docId || 'store'}::${mrn}`, subjectType: 'kv-patient', role: 'kv-patient' });
 
   // One-time legacy migration: re-hash any plaintext credential in place and
   // strip passPlain so the plaintext path can never fire twice.
@@ -881,8 +901,9 @@ function writeLogStore(data) {
 }
 
 // Patient: save daily log to shared store
-syncRouter.post('/save-log', validate(saveLogSchema), asyncHandler(async (req, res) => {
+syncRouter.post('/save-log', authenticate, validate(saveLogSchema), asyncHandler(async (req, res) => {
   const { mrn, date, log } = req.valid;
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readLogStore();
   if (!store[mrn]) store[mrn] = {};
   store[mrn][date] = { ...log, savedAt: new Date().toISOString() };
@@ -891,9 +912,10 @@ syncRouter.post('/save-log', validate(saveLogSchema), asyncHandler(async (req, r
 }));
 
 // Doctor/Patient: get logs for a patient
-syncRouter.get('/get-logs/:mrn', asyncHandler(async (req, res) => {
+syncRouter.get('/get-logs/:mrn', authenticate, asyncHandler(async (req, res) => {
   const { mrn } = req.params;
   if (!mrn) return res.status(400).json({ error: 'mrn required' });
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readLogStore();
   const logs = store[mrn] || {};
   res.json({ ok: true, logs });
@@ -913,8 +935,9 @@ function writeMsgStore(data) {
 }
 
 // Send a message (doctor or patient)
-syncRouter.post('/send-message', validate(sendMessageSchema), asyncHandler(async (req, res) => {
+syncRouter.post('/send-message', authenticate, validate(sendMessageSchema), asyncHandler(async (req, res) => {
   const { mrn, docId, role, text } = req.valid;
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readMsgStore();
   const key = docId + '_' + mrn;
   if (!store[key]) store[key] = [];
@@ -924,8 +947,9 @@ syncRouter.post('/send-message', validate(sendMessageSchema), asyncHandler(async
 }));
 
 // Get messages for a doctor-patient conversation
-syncRouter.get('/get-messages/:docId/:mrn', asyncHandler(async (req, res) => {
+syncRouter.get('/get-messages/:docId/:mrn', authenticate, asyncHandler(async (req, res) => {
   const { docId, mrn } = req.params;
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readMsgStore();
   const key = docId + '_' + mrn;
   const msgs = store[key] || [];
@@ -946,8 +970,9 @@ function writeApptStore(data) {
 }
 
 // Save appointment (doctor or patient)
-syncRouter.post('/save-appointment', validate(saveAppointmentSchema), asyncHandler(async (req, res) => {
+syncRouter.post('/save-appointment', authenticate, validate(saveAppointmentSchema), asyncHandler(async (req, res) => {
   const { mrn, appointment } = req.valid;
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readApptStore();
   if (!store[mrn]) store[mrn] = [];
   store[mrn].push({ ...appointment, savedAt: new Date().toISOString() });
@@ -956,8 +981,9 @@ syncRouter.post('/save-appointment', validate(saveAppointmentSchema), asyncHandl
 }));
 
 // Update appointment status
-syncRouter.post('/update-appointment', validate(updateAppointmentSchema), asyncHandler(async (req, res) => {
+syncRouter.post('/update-appointment', authenticate, validate(updateAppointmentSchema), asyncHandler(async (req, res) => {
   const { mrn, index, status } = req.valid;
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readApptStore();
   const appts = store[mrn] || [];
   if (appts[index]) { appts[index].status = status; appts[index].respondedAt = new Date().toISOString(); writeApptStore(store); }
@@ -965,9 +991,10 @@ syncRouter.post('/update-appointment', validate(updateAppointmentSchema), asyncH
 }));
 
 // Get appointments for a patient
-syncRouter.get('/get-appointments/:mrn', asyncHandler(async (req, res) => {
+syncRouter.get('/get-appointments/:mrn', authenticate, asyncHandler(async (req, res) => {
   const { mrn } = req.params;
   if (!mrn) return res.status(400).json({ error: 'mrn required' });
+  if (!(await requireMrnAccess(req, res, mrn))) return;
   const store = readApptStore();
   const appts = store[mrn] || [];
   res.json({ ok: true, appointments: appts });
@@ -986,8 +1013,8 @@ function writeAvailStore(data) {
   catch (e) { console.error('[avail-store] write failed:', e.message); return false; }
 }
 
-// Save doctor availability (no auth required in desktop mode)
-syncRouter.post('/save-availability', validate(saveAvailabilitySchema), asyncHandler(async (req, res) => {
+// Save doctor availability (doctor/admin only)
+syncRouter.post('/save-availability', authenticate, requireRole('doctor', 'admin'), validate(saveAvailabilitySchema), asyncHandler(async (req, res) => {
   const { docId, slots } = req.valid;
   const store = readAvailStore();
   store[docId] = slots.map(s => ({
@@ -1151,9 +1178,12 @@ function readThSignals() { try { if (_existsSync(TH_SIGNAL_PATH)) return JSON.pa
 function writeThSignals(d) { try { _writeFileSync(TH_SIGNAL_PATH, JSON.stringify(d, null, 2), 'utf-8'); } catch {} }
 
 function genRoomCode() {
+  // Crypto-random: 6 chars from a 32-char unambiguous alphabet (uniform — 256 % 32 == 0).
+  // Math.random made codes predictable, and the code is the room's join credential.
   const c = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = randomBytes(6);
   let code = '';
-  for (let i = 0; i < 6; i++) code += c[Math.floor(Math.random() * c.length)];
+  for (let i = 0; i < 6; i++) code += c[bytes[i] % c.length];
   return code;
 }
 
@@ -1176,7 +1206,7 @@ const thSignalSchema = z.object({
 });
 
 // Doctor: create a video room
-syncRouter.post('/th/create-room', validate(thCreateRoomSchema), asyncHandler(async (req, res) => {
+syncRouter.post('/th/create-room', authenticate, requireRole('doctor', 'admin'), validate(thCreateRoomSchema), asyncHandler(async (req, res) => {
   const { patientMrn, doctorId } = req.valid;
   const roomCode = genRoomCode();
   const rooms = readThRooms();
@@ -1186,7 +1216,7 @@ syncRouter.post('/th/create-room', validate(thCreateRoomSchema), asyncHandler(as
 }));
 
 // Doctor: list active rooms
-syncRouter.get('/th/rooms/:doctorId', asyncHandler(async (req, res) => {
+syncRouter.get('/th/rooms/:doctorId', authenticate, requireRole('doctor', 'admin'), asyncHandler(async (req, res) => {
   const { doctorId } = req.params;
   const rooms = readThRooms();
   const result = [];
@@ -1197,7 +1227,7 @@ syncRouter.get('/th/rooms/:doctorId', asyncHandler(async (req, res) => {
 }));
 
 // Doctor: end a room
-syncRouter.post('/th/end-room', validate(thEndRoomSchema), asyncHandler(async (req, res) => {
+syncRouter.post('/th/end-room', authenticate, requireRole('doctor', 'admin'), validate(thEndRoomSchema), asyncHandler(async (req, res) => {
   const { roomCode } = req.valid;
   const rooms = readThRooms();
   if (rooms[roomCode]) rooms[roomCode].status = 'ended';
@@ -1208,9 +1238,10 @@ syncRouter.post('/th/end-room', validate(thEndRoomSchema), asyncHandler(async (r
   res.json({ ok: true });
 }));
 
-// Patient: check for available rooms
-syncRouter.get('/th/my-rooms/:doctorId/:mrn', asyncHandler(async (req, res) => {
+// Patient: check for available rooms (session patient must match :mrn)
+syncRouter.get('/th/my-rooms/:doctorId/:mrn', authenticate, requireRole('kv-patient'), patientScope, asyncHandler(async (req, res) => {
   const { doctorId, mrn } = req.params;
+  if (req.patientScope.mrn !== mrn) return res.status(403).json({ error: 'Not your patient record' });
   const rooms = readThRooms();
   const result = [];
   for (const [code, room] of Object.entries(rooms)) {
@@ -1219,19 +1250,30 @@ syncRouter.get('/th/my-rooms/:doctorId/:mrn', asyncHandler(async (req, res) => {
   res.json({ ok: true, rooms: result });
 }));
 
-// Patient: join a room
-syncRouter.post('/th/join-room', validate(thJoinRoomSchema), asyncHandler(async (req, res) => {
+// Patient: join a room (only the room's own patient may join)
+syncRouter.post('/th/join-room', authenticate, requireRole('kv-patient'), patientScope, validate(thJoinRoomSchema), asyncHandler(async (req, res) => {
   const { roomCode } = req.valid;
   const rooms = readThRooms();
   if (!rooms[roomCode] || rooms[roomCode].status === 'ended') return res.status(404).json({ error: 'Room not found' });
+  if (rooms[roomCode].patientMrn !== req.patientScope.mrn) return res.status(403).json({ error: 'Not your video room' });
   rooms[roomCode].status = 'active';
   writeThRooms(rooms);
   res.json({ ok: true, roomCode, status: 'active' });
 }));
 
-// WebRTC Signaling: post a message
-syncRouter.post('/th/signal', validate(thSignalSchema), asyncHandler(async (req, res) => {
+// WebRTC Signaling: post a message (must be the room's doctor or its patient)
+syncRouter.post('/th/signal', authenticate, validate(thSignalSchema), asyncHandler(async (req, res) => {
   const { roomCode, type, data, sender } = req.valid;
+  const rooms = readThRooms();
+  const room = rooms[roomCode];
+  if (!room || room.status === 'ended') return res.status(404).json({ error: 'Room not found' });
+  if (req.auth.role === 'kv-patient') {
+    if (room.patientMrn !== String(req.auth.subjectId).split('::')[1]) {
+      return res.status(403).json({ error: 'Not your video room' });
+    }
+  } else if (!['doctor', 'admin'].includes(req.auth.role)) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
   const signals = readThSignals();
   if (!signals[roomCode]) signals[roomCode] = [];
   signals[roomCode].push({ type, data, sender: sender || 'unknown', timestamp: Date.now() });
@@ -1241,8 +1283,19 @@ syncRouter.post('/th/signal', validate(thSignalSchema), asyncHandler(async (req,
 }));
 
 // WebRTC Signaling: poll for messages
-syncRouter.get('/th/signal/:roomCode', asyncHandler(async (req, res) => {
+// WebRTC Signaling: long-poll (must be the room's doctor or its patient)
+syncRouter.get('/th/signal/:roomCode', authenticate, asyncHandler(async (req, res) => {
   const { roomCode } = req.params;
+  const rooms = readThRooms();
+  const room = rooms[roomCode];
+  if (!room || room.status === 'ended') return res.status(404).json({ error: 'Room not found' });
+  if (req.auth.role === 'kv-patient') {
+    if (room.patientMrn !== String(req.auth.subjectId).split('::')[1]) {
+      return res.status(403).json({ error: 'Not your video room' });
+    }
+  } else if (!['doctor', 'admin'].includes(req.auth.role)) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
   const since = parseInt(req.query.since || '0', 10);
   const timeout = Math.min(parseInt(req.query.timeout || '10000', 10), 15000);
   const startTime = Date.now();

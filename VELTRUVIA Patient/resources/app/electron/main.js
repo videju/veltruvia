@@ -3,7 +3,7 @@
 
 import { app, BrowserWindow, shell, ipcMain, Menu, dialog } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, extname } from 'node:path';
+import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 import { createServer } from 'node:http';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import net from 'node:net';
@@ -69,7 +69,8 @@ function serveStatic(req, res) {
   const filePath = join(PUBLIC, pathname);
 
   // Prevent directory traversal
-  if (!filePath.startsWith(PUBLIC)) {
+  const rel = relative(PUBLIC, filePath);
+  if (rel.startsWith('..') || isAbsolute(rel)) {
     res.writeHead(403); res.end('Forbidden');
     return;
   }
@@ -222,7 +223,7 @@ function createWindow() {
     title: 'VELTRUVIA Pro',
     icon: join(ROOT, 'public', 'icons', 'doctor-512.png'),
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,

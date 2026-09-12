@@ -8,7 +8,7 @@
 
 import { app, BrowserWindow, shell, ipcMain, Menu, dialog } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, join, extname } from 'node:path';
+import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 
 // Windows compatibility fixes
 app.commandLine.appendSwitch('no-sandbox');
@@ -76,7 +76,8 @@ function serveStatic(req, res) {
 
   if (pathname === '/') pathname = '/patient.html';
   const filePath = join(PUBLIC, pathname);
-  if (!filePath.startsWith(PUBLIC)) { res.writeHead(403); res.end('Forbidden'); return; }
+  const rel = relative(PUBLIC, filePath);
+  if (rel.startsWith('..') || isAbsolute(rel)) { res.writeHead(403); res.end('Forbidden'); return; }
   if (!existsSync(filePath) || !statSync(filePath).isFile()) {
     const fallback = join(PUBLIC, 'patient.html');
     if (existsSync(fallback)) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); createReadStream(fallback).pipe(res); }
@@ -181,7 +182,7 @@ function createWindow() {
     title: 'VELTRUVIA Patient',
     icon: join(PUBLIC, 'icons', 'patient-512.png'),
     webPreferences: {
-      preload: join(__dirname, 'preload.js'),
+      preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
