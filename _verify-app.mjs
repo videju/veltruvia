@@ -10,7 +10,7 @@ const port = 3000;
 const base = `http://localhost:${port}`;
 const dbPath = join(appDir, 'test-verify.db');const runtimeFiles = ['.demo-admin-password', 'patient-store.json', 'appointments-store.json',
   'availability-store.json', 'logs-store.json', 'messages-store.json',
-  'telehealth-rooms.json', 'telehealth-signals.json'].map(f => join(appDir, f));
+  'telehealth-rooms.json', 'telehealth-signals.json', 'chain.json'].map(f => join(appDir, f));
 for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', ...runtimeFiles]) { try { rmSync(f); } catch {} }
 const server = spawn('node', ['src/server.js'], {
   cwd: appDir,

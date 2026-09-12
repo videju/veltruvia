@@ -24,6 +24,7 @@ dbg*.log
 VELTRUVIA*/resources/app/patient-store.json
 VELTRUVIA*/resources/app/*-store.json
 VELTRUVIA*/resources/app/telehealth-*.json
+VELTRUVIA*/resources/app/chain.json
 
 # Build outputs
 dist-desktop/
