@@ -14,9 +14,14 @@ import { startReminderScheduler } from './reminders.js';
 import { closeDb, flushDb } from './db/index.js';
 import { attachTelehealthWs } from './routes/telehealth.js';
 import { startMllpServer, getMllpStatus } from './hl7/mllp.js';
+import blockchain from './blockchain/index.js';
 
 startAppointmentReminders();
 startReminderScheduler();
+
+// Activate the audit chain (Hardhat if deployed, otherwise the shared file
+// chain in data/chain.json) so audited actions are recorded tamper-evidently.
+blockchain.connect().catch(err => console.warn('[blockchain] init failed:', err.message));
 
 // ── TLS / HTTPS support ───────────────────────────────────────────
 // If TLS_KEY and TLS_CERT env vars point to PEM files, the server

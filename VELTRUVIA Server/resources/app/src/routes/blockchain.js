@@ -15,7 +15,9 @@ export const blockchainRouter = Router();
  * GET /api/blockchain/status
  * Get blockchain audit trail statistics
  */
-blockchainRouter.get('/status', authenticate, asyncHandler(async (req, res) => {
+// Public: blockchain.html loads before login, and the data is non-sensitive
+// statistics (block counts and validity) — matches /api/blockchain/health.
+blockchainRouter.get('/status', asyncHandler(async (req, res) => {
   const stats = await getBlockchainStats();
   res.json({
     ok: true,

@@ -258,8 +258,5 @@ console.log(`══════════════════════�
 server.kill();
 await new Promise(r => setTimeout(r, 800));
 try { server.kill('SIGKILL'); } catch {}
-const runtimeFiles = ['.demo-admin-password', 'patient-store.json', 'appointments-store.json',
-  'availability-store.json', 'logs-store.json', 'messages-store.json',
-  'telehealth-rooms.json', 'telehealth-signals.json'].map(f => join(appDir, f));
-for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', ...runtimeFiles]) { try { rmSync(f); } catch {} }
+for (const f of runtimeFiles) { try { rmSync(f); } catch {} }
 process.exit(fail > 0 ? 1 : 0);
