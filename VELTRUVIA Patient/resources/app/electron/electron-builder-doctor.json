@@ -1,0 +1,51 @@
+{
+  "appId": "com.veltruvia.doctor",
+  "productName": "VELTRUVIA Doctor",
+  "directories": {
+    "output": "dist-desktop"
+  },
+  "files": [
+    "src/**/*",
+    "public/**/*",
+    "electron/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "electron/main-doctor.js"
+  },
+  "extraResources": [
+    {
+      "from": "node_modules/sql.js/dist",
+      "to": "sql.js"
+    },
+    {
+      "from": "node_modules/electron/dist/ffmpeg.dll",
+      "to": "ffmpeg.dll"
+    }
+  ],
+  "asar": false,
+  "win": {
+    "target": [
+      {
+        "target": "dir",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "public/icons/doctor-512.png"
+  },
+  "mac": {
+    "target": "dmg",
+    "category": "public.app-category.medical"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "icon": "public/icons/doctor-512.png",
+    "category": "Medical"
+  }
+}

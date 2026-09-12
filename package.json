@@ -1,0 +1,17 @@
+{
+  "name": "veltruvia-suite",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "VELTRUVIA neuro-oncology EMR desktop suite — quality gate, verification, and docs",
+  "scripts": {
+    "check": "node check.mjs",
+    "verify": "node _verify-all.mjs",
+    "verify:server": "node _verify-app.mjs \"VELTRUVIA Server/resources/app\" Server",
+    "verify:doctor": "node _verify-app.mjs \"VELTRUVIA Doctor/resources/app\" Doctor",
+    "verify:patient": "node _verify-app.mjs \"VELTRUVIA Patient/resources/app\" Patient",
+    "verify:lab": "node _verify-app.mjs \"VELTRUVIA Lab/resources/app\" Lab",
+    "sync-bundles": "node sync-bundles.mjs",
+    "precommit": "npm run check && npm run verify"
+  }
+}

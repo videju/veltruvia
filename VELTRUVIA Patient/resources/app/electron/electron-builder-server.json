@@ -1,0 +1,47 @@
+{
+  "appId": "com.veltruvia.server",
+  "productName": "VELTRUVIA Server",
+  "directories": {
+    "output": "dist-desktop"
+  },
+  "files": [
+    "src/**/*",
+    "public/**/*",
+    "electron/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "electron/main-server.js"
+  },
+  "extraResources": [
+    {
+      "from": "node_modules/sql.js/dist",
+      "to": "sql.js"
+    },
+    {
+      "from": "node_modules/electron/dist/ffmpeg.dll",
+      "to": "ffmpeg.dll"
+    }
+  ],
+  "asar": false,
+  "win": {
+    "target": [
+      {
+        "target": "dir",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "public/icons/server-512.png"
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "public/icons/server-512.png",
+    "category": "public.app-category.medical"
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "icon": "public/icons/server-512.png",
+    "category": "Medical"
+  }
+}

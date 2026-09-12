@@ -1,0 +1,222 @@
+// Portable full-feature verification runner — usage: node verify-app.mjs "<appDir>" "<appName>"
+// Starts the app's own src/server.js on :3000 with an ephemeral DB and runs ~50 feature checks.
+import { spawn } from 'node:child_process';
+import { existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+
+const appDir = process.argv[2];
+const appName = process.argv[3] || appDir;
+const port = 3000;
+const base = `http://localhost:${port}`;
+const dbPath = join(appDir, 'test-verify.db');
+
+for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password')]) { try { rmSync(f); } catch {} }
+
+const server = spawn('node', ['src/server.js'], {
+  cwd: appDir,
+  env: {
+    ...process.env,
+    JWT_SECRET: 'test-secret',
+    PHI_ENCRYPTION_KEY: 'test-phi-key-32-bytes-long-here',
+    DB_PATH: dbPath,
+    PORT: String(port),
+    NODE_ENV: 'test',
+    VELTRUVIA_DEMO: 'true',   // seed demo accounts so login flows can be tested
+    VELTRUVIA_DEMO_PASSWORD: 'testdoc123', // pinned for deterministic test logins
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
+});
+let out = '';
+server.stdout.on('data', d => { out += d; });
+server.stderr.on('data', d => { out += d; });
+server.on('error', e => { console.error('spawn error:', e.message); process.exit(1); });
+
+// Fail fast if something else already owns the port (stale server = testing the wrong code)
+import net from 'node:net';
+await new Promise((resolve, reject) => {
+  const probe = net.createServer();
+  probe.once('error', () => reject(new Error('Port 3000 already in use — kill the stale process first (netstat -ano | findstr :3000)')));
+  probe.listen(port, '127.0.0.1', () => probe.close(() => resolve()));
+});
+
+async function waitReady() {
+  for (let i = 0; i < 60; i++) {
+    try {
+      const c = new AbortController();
+      const t = setTimeout(() => c.abort(), 1500);
+      const r = await fetch(`${base}/health`, { signal: c.signal });
+      clearTimeout(t);
+      if (r.ok) return true;
+    } catch {}
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return false;
+}
+
+function api(method, path, body = null, cookie = '') {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (cookie) opts.headers.Cookie = cookie;
+  if (body) opts.body = JSON.stringify(body);
+  return fetch(base + path, opts).then(async res => {
+    const setCookie = res.headers.get('set-cookie') || '';
+    let data; try { data = await res.json(); } catch { data = null; }
+    return { status: res.status, data, setCookie };
+  });
+}
+const extractCookie = sc => sc.split(',').map(c => c.trim().split(';')[0]).join('; ');
+
+let pass = 0, fail = 0; const failures = [];
+function check(name, cond) {
+  if (cond) { pass++; console.log('  ✅ ' + name); }
+  else { fail++; failures.push(name); console.log('  ❌ ' + name); }
+}
+
+const ready = await waitReady();
+if (!ready) {
+  console.error(`${appName}: SERVER FAILED TO START:\n` + out.slice(-2000));
+  server.kill(); process.exit(1);
+}
+console.log(`${appName}: server ready on :${port}\n`);
+
+// ── AUTH ──
+console.log('📋 Authentication');
+let r = await api('POST', '/api/auth/login', { email: 'test@example.com', password: 'testdoc123' });
+check('Doctor login', r.data?.ok === true);
+const docCookie = extractCookie(r.setCookie);
+r = await api('POST', '/api/auth/login', { email: 'test@example.com', password: 'wrong' });
+check('Wrong password rejected (401)', r.status === 401);
+r = await api('GET', '/api/admin/users', null, docCookie);
+check('Admin users list', r.data?.users?.length > 0);
+r = await api('POST', '/api/auth/logout', null, docCookie);
+check('Logout revokes session', r.data?.ok === true);
+r = await api('GET', '/api/admin/users', null, docCookie);
+check('Revoked session rejected (401)', r.status === 401);
+r = await api('POST', '/api/auth/login', { email: 'test@example.com', password: 'testdoc123' });
+const cookie = extractCookie(r.setCookie);
+r = await api('POST', '/api/sync/store-login', { mrn: '12345', password: 'testpat123' });
+check('Patient store login', r.data?.ok === true);
+r = await api('POST', '/api/sync/lab-store-login', { username: 'testlab', password: 'testlab123' });
+check('Lab store login', r.data?.ok === true);
+
+// ── CDS ──
+console.log('\n💊 Clinical Decision Support');
+r = await api('POST', '/api/cds/interactions', { medications: ['temozolomide', 'valproic acid'] }, cookie);
+check('Drug interactions (TMZ+VPA severe)', r.data?.interactions?.length > 0 && r.data.interactions[0].severity === 'severe');
+r = await api('POST', '/api/cds/interactions', { medications: ['aspirin', 'vitamin c'] }, cookie);
+check('No false-positive interactions', r.data?.interactions?.length === 0);
+r = await api('POST', '/api/cds/dosage-check', { medication: 'temozolomide', dosage: '300 mg/m2', frequency: 'daily' }, cookie);
+check('Dosage overdose detection', r.data?.alerts?.length > 0);
+r = await api('POST', '/api/cds/allergies', { mrn: 'TEST001', drugName: 'penicillin', reaction: 'Rash', severity: 'moderate' }, cookie);
+check('Add allergy', r.data?.ok === true);
+r = await api('POST', '/api/cds/allergy-check', { patientMrn: 'TEST001', medications: ['amoxicillin'] }, cookie);
+check('Allergy cross-reactivity alert', r.data?.alerts?.length > 0);
+r = await api('GET', '/api/cds/drug-info/cisplatin', null, cookie);
+check('Drug info (cisplatin)', r.data?.info?.brand === 'Platinol');
+r = await api('GET', '/api/cds/drug-info/bevacizumab', null, cookie);
+check('Drug info (bevacizumab)', r.data?.info?.brand === 'Avastin');
+
+// ── CLINICAL ──
+console.log('\n🏥 Clinical Features');
+r = await api('POST', '/api/features/notes', { patientMrn: 'TEST001', noteType: 'soap', subjective: 'Headache', objective: 'Normal', assessment: 'GBM', plan: 'Continue TMZ' }, cookie);
+check('Create SOAP note', r.data?.ok === true);
+r = await api('GET', '/api/features/notes/TEST001', null, cookie);
+check('List notes', r.data?.notes?.length > 0);
+r = await api('GET', '/api/features/protocols', null, cookie);
+check('Protocols seeded (>=4)', r.data?.protocols?.length >= 4);
+r = await api('POST', '/api/features/outcomes', { patientMrn: 'TEST001', outcomeType: 'response', date: '2024-01-01', value: 'Partial' }, cookie);
+check('Create outcome (valid)', r.data?.ok === true);
+r = await api('POST', '/api/features/outcomes', { patientMrn: 'TEST001', outcomeType: 'INVALID', date: '2024-01-01', value: 'x' }, cookie);
+check('Invalid outcome rejected (400)', r.status === 400);
+r = await api('POST', '/api/features/adherence', { patientMrn: 'TEST001', medication: 'temozolomide', scheduledDate: '2024-01-15', status: 'taken' }, cookie);
+check('Create adherence record', r.data?.ok === true);
+r = await api('POST', '/api/features/chemo', { patientMrn: 'TEST001', protocolName: 'Stupp Protocol', startDate: '2024-01-01', totalCycles: 6 }, cookie);
+check('Create chemo cycle', r.data?.ok === true);
+r = await api('POST', '/api/features/referrals', { patientMrn: 'TEST001', toSpecialty: 'Radiation Oncology', reason: 'RT planning' }, cookie);
+check('Create referral', r.data?.ok === true);
+r = await api('GET', '/api/features/audit/TEST001', null, cookie);
+check('Audit trail entries', r.data?.entries?.length > 0);
+r = await api('GET', '/api/features/export/TEST001', null, cookie);
+check('Patient data export', r.status === 200 && !r.data?.error);
+
+// ── TELEHEALTH ──
+console.log('\n📹 Telehealth');
+r = await api('POST', '/api/telehealth/rooms', { patientMrn: 'TEST001' }, cookie);
+check('Create room', r.data?.ok === true && !!r.data?.roomCode);
+const roomCode = r.data?.roomCode;
+r = await api('GET', '/api/telehealth/rooms', null, cookie);
+check('List rooms', r.data?.rooms?.length > 0);
+r = await api('POST', `/api/telehealth/rooms/${roomCode}/end`, null, cookie);
+check('End room', r.data?.ok === true);
+
+// ── BILLING ──
+console.log('\n💰 Billing');
+r = await api('POST', '/api/billing/invoices', { patientMrn: 'TEST001', items: [{ description: 'Office visit', unitPrice: 150, quantity: 1 }] }, cookie);
+check('Create invoice (total 150)', r.data?.invoiceNumber && r.data?.total === 150);
+r = await api('GET', '/api/billing/invoices?patientMrn=TEST001', null, cookie);
+check('List invoices', Array.isArray(r.data) && r.data.length > 0);
+r = await api('GET', '/api/billing/stats', null, cookie);
+check('Billing stats', r.data?.totalRevenue !== undefined);
+r = await api('GET', '/api/billing/codes/icd10?q=brain', null, cookie);
+check('ICD-10 lookup', Array.isArray(r.data) && r.data.length > 0);
+r = await api('GET', '/api/billing/codes/cpt?q=mri', null, cookie);
+check('CPT lookup', Array.isArray(r.data) && r.data.length > 0);
+
+// ── HL7 ──
+console.log('\n🔬 HL7 Lab Interface');
+const hl7Msg = 'MSH|^~\\&|LAB_SYSTEM|TEST_HOSP|VELTRUVIA|VELTRUVIA|20240115120000||ORU^R01|MSG001|P|2.5.1\rPID|1||MRN-99999^^^TEST_HOSP^MR||John Doe||19800101|M\rOBR|1||ORD001|CBC|||20240115|||||||20240115||||||||F\rOBX|1|NM|WBC^White Blood Cell||7.5|10*3/uL|4.0-11.0|||F|||20240115';
+r = await api('POST', '/api/hl7/receive', { message: hl7Msg }, cookie);
+check('Receive HL7 ORU (lab result stored)', r.data?.ok === true && r.data?.resultsStored > 0);
+const adtMsg = 'MSH|^~\\&|ADT_SYSTEM|TEST_HOSP|VELTRUVIA|VELTRUVIA|20240115120000||ADT^A01|MSG002|P|2.5.1\rPID|1||MRN-88888^^^TEST_HOSP^MR||Jane Smith||19900515|F';
+r = await api('POST', '/api/hl7/receive', { message: adtMsg }, cookie);
+check('Receive HL7 ADT (patient)', r.data?.ok === true);
+r = await api('GET', '/api/hl7/patient/MRN-88888', null, cookie);
+check('Generate HL7 patient message', r.status === 200);
+
+// ── FHIR ──
+console.log('\n🔗 FHIR');
+r = await api('GET', '/api/fhir/Patient/12345', null, cookie);
+check('FHIR Patient resource', r.data?.resourceType === 'Patient');
+r = await api('GET', '/api/fhir/Condition/12345', null, cookie);
+check('FHIR Condition bundle', r.data?.resourceType === 'Bundle');
+r = await api('GET', '/api/fhir/Bundle/TEST001', null, cookie);
+check('FHIR full Bundle (TEST001 has entries)', r.data?.resourceType === 'Bundle' && r.data?.entry?.length > 0);
+
+// ── HIPAA / REPORTS ──
+console.log('\n🔒 HIPAA & Reports');
+r = await api('GET', '/api/hipaa/retention', null, cookie);
+check('Retention policies', Array.isArray(r.data));
+r = await api('GET', '/api/reports/panel-health', null, cookie);
+check('Panel health report', r.data?.totalPatients !== undefined);
+r = await api('GET', '/api/reports/financial', null, cookie);
+check('Financial report', r.data?.totalRevenue !== undefined);
+r = await api('GET', '/api/reports/operational', null, cookie);
+check('Operational report', r.data?.totalNotes !== undefined);
+r = await api('GET', '/api/reports/quality', null, cookie);
+check('Quality report', r.data?.measures?.length > 0);
+r = await api('GET', '/api/reports/cancer-registry', null, cookie);
+check('Cancer registry report', r.data?.totalPatients !== undefined);
+
+// ── SECURITY / FRONTEND ──
+console.log('\n🛡️ Security & Frontend');
+r = await api('GET', '/api/nonexistent');
+check('404 for unknown API route', r.status === 404);
+r = await api('GET', '/health?deep=1');
+check('Deep health (db ok)', r.data?.ok === true && r.data?.db === true);
+r = await api('GET', '/api/health');
+check('API health', r.data?.ok === true);
+for (const p of ['/', '/patient.html', '/lab.html', '/admin.html', '/manifest.json']) {
+  r = await fetch(base + p);
+  check(`GET ${p}`, r.status === 200);
+}
+r = await fetch(base + '/icons/doctor-512.png');
+check('Icon asset served (/icons/doctor-512.png)', r.status === 200 && (await r.arrayBuffer()).byteLength > 1000);
+
+console.log(`\n═══════════════════════════════════════════════`);
+console.log(`  ${appName}: ${pass} passed, ${fail} failed, ${pass + fail} total`);
+console.log(`═══════════════════════════════════════════════`);
+
+server.kill();
+await new Promise(r => setTimeout(r, 800));
+try { server.kill('SIGKILL'); } catch {}
+for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password')]) { try { rmSync(f); } catch {} }
+process.exit(fail > 0 ? 1 : 0);

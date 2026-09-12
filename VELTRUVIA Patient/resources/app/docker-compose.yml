@@ -1,0 +1,83 @@
+# ═══════════════════════════════════════════════════════════════════════
+# VELTRUVIA Docker Compose
+# Production deployment with persistent volumes
+# ═══════════════════════════════════════════════════════════════════════
+
+version: '3.8'
+
+services:
+  # ── VELTRUVIA EMR Server ──────────────────────────────────────────
+  veltruvia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: veltruvia-emr
+    restart: unless-stopped
+    ports:
+      - "3000:3000"    # HTTP/HTTPS
+      - "2575:2575"    # MLLP/TCP (lab instruments)
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-$(openssl rand -hex 32)}
+      - DB_PATH=/app/data/veltruvia.db
+      - BACKUP_INTERVAL_MS=3600000  # Hourly backups
+      - MLLP_PORT=2575
+      # TLS (optional — set paths to PEM files)
+      # - TLS_KEY=/app/certs/server.key
+      # - TLS_CERT=/app/certs/server.crt
+      # CORS origins (comma-separated)
+      - CORS_ORIGINS=http://localhost:3000,https://veltruvia.local
+      # Sentry error tracking (optional)
+      # - SENTRY_DSN=https://your-dsn@sentry.io/project-id
+    volumes:
+      - veltruvia-data:/app/data        # SQLite database + backups
+      - veltruvia-logs:/app/logs        # Application logs
+      # Uncomment for TLS:
+      # - ./certs:/app/certs:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+    networks:
+      - veltruvia-net
+
+  # ── Nginx Reverse Proxy (optional, for production TLS) ────────────
+  nginx:
+    image: nginx:alpine
+    container_name: veltruvia-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      veltruvia:
+        condition: service_healthy
+    networks:
+      - veltruvia-net
+    profiles:
+      - production
+
+volumes:
+  veltruvia-data:
+    driver: local
+  veltruvia-logs:
+    driver: local
+
+networks:
+  veltruvia-net:
+    driver: bridge

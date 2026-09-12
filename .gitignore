@@ -1,0 +1,72 @@
+# Dependencies (each bundle carries its own; never commit)
+node_modules/
+
+# Runtime databases (real patient data never belongs in git)
+*.db
+*.db-wal
+*.db-shm
+test.db
+test-verify.db*
+*.sqlite
+
+# Generated demo credential file (only exists when VELTRUVIA_DEMO=true)
+.demo-admin-password
+
+# Runtime stores and logs
+data/
+*.log
+verify-server.log
+verify-tests.log
+dbg*.log
+
+# Build outputs
+dist-desktop/
+dist/
+
+# Electron runtime binaries (rebuildable, huge — not source)
+VELTRUVIA Server/*.dll
+VELTRUVIA Server/*.pak
+VELTRUVIA Server/*.bin
+VELTRUVIA Server/*.dat
+VELTRUVIA Server/*.json
+VELTRUVIA Server/locales/
+VELTRUVIA Server/LICENSES.chromium.html
+VELTRUVIA Server/LICENSE.electron.txt
+VELTRUVIA Server/VELTRUVIA Server.exe
+VELTRUVIA Doctor/*.dll
+VELTRUVIA Doctor/*.pak
+VELTRUVIA Doctor/*.bin
+VELTRUVIA Doctor/*.dat
+VELTRUVIA Doctor/*.json
+VELTRUVIA Doctor/locales/
+VELTRUVIA Doctor/LICENSES.chromium.html
+VELTRUVIA Doctor/LICENSE.electron.txt
+VELTRUVIA Doctor/VELTRUVIA Doctor.exe
+VELTRUVIA Patient/*.dll
+VELTRUVIA Patient/*.pak
+VELTRUVIA Patient/*.bin
+VELTRUVIA Patient/*.dat
+VELTRUVIA Patient/*.json
+VELTRUVIA Patient/locales/
+VELTRUVIA Patient/LICENSES.chromium.html
+VELTRUVIA Patient/LICENSE.electron.txt
+VELTRUVIA Patient/VELTRUVIA Patient.exe
+VELTRUVIA Lab/*.dll
+VELTRUVIA Lab/*.pak
+VELTRUVIA Lab/*.bin
+VELTRUVIA Lab/*.dat
+VELTRUVIA Lab/*.json
+VELTRUVIA Lab/locales/
+VELTRUVIA Lab/LICENSES.chromium.html
+VELTRUVIA Lab/LICENSE.electron.txt
+VELTRUVIA Lab/VELTRUVIA Lab.exe
+
+# Secrets — NEVER commit
+.env
+
+# Runtime shared config (server discovery state)
+config/
+
+# OS / editor noise
+Thumbs.db
+.DS_Store

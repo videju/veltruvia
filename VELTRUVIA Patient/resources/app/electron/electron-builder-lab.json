@@ -1,0 +1,51 @@
+{
+  "appId": "com.veltruvia.lab",
+  "productName": "VELTRUVIA Lab",
+  "directories": {
+    "output": "dist-desktop"
+  },
+  "files": [
+    "src/**/*",
+    "public/**/*",
+    "electron/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "extraMetadata": {
+    "main": "electron/main-lab.js"
+  },
+  "extraResources": [
+    {
+      "from": "node_modules/sql.js/dist",
+      "to": "sql.js"
+    },
+    {
+      "from": "node_modules/electron/dist/ffmpeg.dll",
+      "to": "ffmpeg.dll"
+    }
+  ],
+  "asar": false,
+  "win": {
+    "target": [
+      {
+        "target": "dir",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "public/icons/lab-512.png"
+  },
+  "mac": {
+    "target": "dmg",
+    "category": "public.app-category.medical"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "icon": "public/icons/lab-512.png",
+    "category": "Medical"
+  }
+}

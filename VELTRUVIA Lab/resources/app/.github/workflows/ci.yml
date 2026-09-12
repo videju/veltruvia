@@ -1,0 +1,88 @@
+name: VELTRUVIA CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20.x, 22.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter (if configured)
+        run: npx eslint src/ --ext .js,.mjs || true
+        continue-on-error: true
+
+      - name: Run tests
+        run: |
+          # Start server in background
+          node src/server.js &
+          SERVER_PID=$!
+          sleep 3
+          
+          # Run test suite
+          node --test tests/api.test.js
+          TEST_EXIT=$?
+          
+          # Cleanup
+          kill $SERVER_PID 2>/dev/null || true
+          exit $TEST_EXIT
+        env:
+          NODE_ENV: test
+          PORT: 3000
+          JWT_SECRET: test-secret-key-for-ci
+          PHI_ENCRYPTION_KEY: test-phi-key-for-ci-only-32-bytes!!
+          DB_EPHEMERAL: 'true'
+
+      - name: Build check
+        run: node -e "import('./src/app.js').then(() => console.log('✅ App builds successfully')).catch(e => { console.error('❌ Build failed:', e.message); process.exit(1); })"
+        env:
+          NODE_ENV: test
+          JWT_SECRET: test-secret-key-for-ci
+          PHI_ENCRYPTION_KEY: test-phi-key-for-ci-only-32-bytes!!
+          DB_EPHEMERAL: 'true'
+
+  # Deploy job (manual trigger or on release)
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Create release artifact
+        run: |
+          echo "📦 Creating deployment artifact..."
+          tar -czf veltruvia-release.tar.gz \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='tests' \
+            --exclude='.github' \
+            .
+          echo "✅ Artifact created: veltruvia-release.tar.gz"
+          ls -lh veltruvia-release.tar.gz
+
+      # Add your deployment steps here:
+      # - Deploy to Render/Railway/Fly.io
+      # - Upload to S3
+      # - SCP to production server
