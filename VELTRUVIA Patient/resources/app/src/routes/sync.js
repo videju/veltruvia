@@ -127,10 +127,14 @@ function hashUiPasswordV2(password) {
 function verifyUiPassword(password, stored) {
   if (!stored) return false;
   let expected = String(stored);
-  // SECURITY: only hashed credentials are verifiable. A stored plaintext
-  // value is rejected outright — legacy plaintext rows must be re-saved
-  // (which re-hashes) before they can log in.
-  if (!expected.startsWith('pbkdf2')) return false;
+  if (!expected.startsWith('pbkdf2')) {
+    // One-time legacy migration: a stored plaintext value is compared
+    // directly. On success upgradeStoredPassword() immediately re-hashes
+    // and strips passPlain, so this path can fire at most once per
+    // account. Rejecting plaintext outright would permanently lock out
+    // every legacy user with no way to recover.
+    return expected === String(password);
+  }
   let actual = String(password);
   if (expected.startsWith('pbkdf2v2:')) {
     const [, iterStr, salt, hash] = expected.split(':');
@@ -812,6 +816,16 @@ syncRouter.post('/store-login', loginLimiter, validate(storeLoginSchema), asyncH
 
   if (!authOk) return res.status(401).json({ error: 'Invalid MRN or password' });
 
+  // One-time legacy migration: re-hash any plaintext credential in place and
+  // strip passPlain so the plaintext path can never fire twice.
+  if (pat.passPlain || !String(pat.pass || '').startsWith('pbkdf2')) {
+    try {
+      store[mrn] = { ...pat, pass: hashUiPasswordV2(password) };
+      delete store[mrn].passPlain;
+      writePatientStore(store);
+    } catch { /* migration is best-effort; login still succeeds */ }
+  }
+
   // SECURITY: Never return password hashes or plaintext passwords to the client
   const safePatient = { mrn: pat.mrn, name: pat.name, dob: pat.dob, diag: pat.diag, docId: pat.docId };
   res.json({
@@ -833,6 +847,15 @@ syncRouter.post('/lab-store-login', loginLimiter, validate(labStoreLoginSchema),
       let authOk = false;
       if (v.password) authOk = verifyUiPassword(password, v.password);
       if (authOk) {
+        // One-time legacy migration: re-hash plaintext credentials in place.
+        if (v.passPlain || !String(v.password || '').startsWith('pbkdf2')) {
+          try {
+            const upgraded = { ...v, password: hashUiPasswordV2(password) };
+            delete upgraded.passPlain;
+            store[k] = upgraded;
+            writePatientStore(store);
+          } catch { /* best-effort */ }
+        }
         await createSession(res, { subjectId: v.labId, subjectType: 'kv-lab', role: 'kv-lab' });
         // SECURITY: Never return password hashes to the client
         const safeLab = { labId: v.labId, username: v.username, name: v.name, docId: v.docId };

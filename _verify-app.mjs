@@ -2,23 +2,20 @@
 // Starts the app's own src/server.js on :3000 with an ephemeral DB and runs ~50 feature checks.
 import { spawn } from 'node:child_process';
 import { existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 const appDir = process.argv[2];
 const appName = process.argv[3] || appDir;
 const port = 3000;
 const base = `http://localhost:${port}`;
-const dbPath = join(appDir, 'test-verify.db');
-
-for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password')]) { try { rmSync(f); } catch {} }
-
+const dbPath = join(appDir, 'test-verify.db');for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password'), join(appDir, 'patient-store.json')]) { try { rmSync(f); } catch {} }
 const server = spawn('node', ['src/server.js'], {
   cwd: appDir,
   env: {
     ...process.env,
     JWT_SECRET: 'test-secret',
     PHI_ENCRYPTION_KEY: 'test-phi-key-32-bytes-long-here',
-    DB_PATH: dbPath,
+    DB_PATH: resolve(dbPath),  // absolute: the server derives patient-store.json's dir from this
     PORT: String(port),
     NODE_ENV: 'test',
     VELTRUVIA_DEMO: 'true',   // seed demo accounts so login flows can be tested
@@ -218,5 +215,5 @@ console.log(`══════════════════════�
 server.kill();
 await new Promise(r => setTimeout(r, 800));
 try { server.kill('SIGKILL'); } catch {}
-for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password')]) { try { rmSync(f); } catch {} }
+for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', join(appDir, '.demo-admin-password'), join(appDir, 'patient-store.json')]) { try { rmSync(f); } catch {} }
 process.exit(fail > 0 ? 1 : 0);

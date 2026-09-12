@@ -19,6 +19,10 @@ verify-server.log
 verify-tests.log
 dbg*.log
 
+# PHI runtime store (never commit patient data; normally lives in data/,
+# but a misconfigured relative DB_PATH can drop it in the bundle root)
+VELTRUVIA*/resources/app/patient-store.json
+
 # Build outputs
 dist-desktop/
 dist/
