@@ -109,3 +109,6 @@ Thumbs.db
 
 # Stray portable-exe duplicates in the Server bundle root (deploy artifacts)
 VELTRUVIA Server/VELTRUVIA Doctor.exe
+
+# Test-run runtime store (recreated by npm test)
+hardening-tmp/
