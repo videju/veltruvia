@@ -20,4 +20,3 @@ jobs:
         run: npm run check
       - name: Run test suite
         run: npm test
-        working-directory: VELTRUVIA Server/resources/app
