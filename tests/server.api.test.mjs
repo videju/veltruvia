@@ -82,7 +82,10 @@ before(async () => {
   adminCookie = cookieOf(r.setCookie);
 });
 
-after(() => { server.kill(); });
+after(() => {
+  server.kill('SIGKILL'); // Windows ignores the signal; POSIX force-terminates so open handles can't hold the runner open
+  setImmediate(() => process.exit(0)); // test-force-exit fallback (see package.json)
+});
 
 // ── Infrastructure ────────────────────────────────────────────────
 test('health endpoint reports ok', async () => {

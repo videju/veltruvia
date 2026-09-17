@@ -6,7 +6,7 @@
   "description": "VELTRUVIA neuro-oncology EMR desktop suite — quality gate, verification, and docs",
   "scripts": {
     "check": "node check.mjs",
-    "test": "node --test tests/",
+    "test": "node --test --test-force-exit tests/",
     "verify": "node _verify-all.mjs",
     "verify:server": "node _verify-app.mjs \"VELTRUVIA Server/resources/app\" Server",
     "verify:doctor": "node _verify-app.mjs \"VELTRUVIA Doctor/resources/app\" Doctor",
