@@ -42,6 +42,7 @@
     <div class="fg"><label>MRN</label><input id="li-mrn" placeholder="MRN-XXXXXXXX" style="text-transform:uppercase" data-action-input="upper" aria-label="Medical record number"></div>
     <div class="fg"><label>Password</label><input id="li-pass" type="password" placeholder="••••••••" aria-label="Password"></div>
     <button class="big-btn log-btn" data-action="doLogin" style="margin-bottom:12px">Sign In →</button>
+    <div style="text-align:center;margin-bottom:10px;"><a href="#" data-recover="patient" style="font-size:12.5px;color:#7dd3fc;text-decoration:none;">Forgot password?</a></div>
     <button class="big-btn nav-btn-style" data-action="checkPatientAccounts" style="font-size:12px">🔍 Check Available Accounts</button>
     <div id="pat-accounts-list" style="margin-top:10px;font-size:12px;color:var(--text-muted)"></div>
   </div>
@@ -256,6 +257,7 @@
 <script src="js/secure-store.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/telehealth-ws.js"></script>
+<script src="js/rtc-config.js"></script>
 <script src="js/page/patient-1-core.js"></script>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -265,5 +267,7 @@
 
 <!-- Standalone mode: LOCK to Patient portal only -->
 <script src="js/page/patient-3-boot.js"></script>
+<script src="js/recover.js"></script>
+<script src="js/push-client.js"></script>
 </body>
 </html>

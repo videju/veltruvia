@@ -536,7 +536,7 @@ async function joinVideoCall(roomCode){
   document.body.appendChild(overlay);
   document.getElementById('local-video').srcObject=_localStream;
   // Simple WebRTC signaling via polling
-  _pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  _pc=new RTCPeerConnection(window.VELTRUVIA_RTC ? window.VELTRUVIA_RTC.rtcConfiguration() : {iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
   _localStream.getTracks().forEach(t=>_pc.addTrack(t,_localStream));
   _pc.onicecandidate=e=>{if(e.candidate)api('/sync/th/signal',{method:'POST',body:JSON.stringify({roomCode,type:'candidate',data:e.candidate,sender:'patient'})})};
   _pc.ontrack=e=>{document.getElementById('remote-video').srcObject=e.streams[0]};

@@ -14,8 +14,16 @@ import { startReminderScheduler } from './reminders.js';
 import { closeDb, flushDb } from './db/index.js';
 import { attachTelehealthWs } from './routes/telehealth.js';
 import { startMllpServer, getMllpStatus } from './hl7/mllp.js';
+import { mailConfigured } from './mail.js';
 import { startBackups } from './db/backup.js';
+import { installErrorHandlers } from './errors.js';
 import blockchain from './blockchain/index.js';
+
+// Crash/error capture first so even boot-time failures are recorded.
+installErrorHandlers({
+  logPath: path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : '.', 'error-log.jsonl'),
+  name: 'veltruvia-server',
+});
 
 startAppointmentReminders();
 startReminderScheduler();
@@ -56,6 +64,12 @@ if (tlsKeyPath && tlsCertPath && fs.existsSync(tlsKeyPath) && fs.existsSync(tlsC
 
 // Attach WebSocket server for telehealth signaling
 attachTelehealthWs(server);
+
+// Surface missing mail config early — doctor signup depends on email OTP.
+if (!mailConfigured()) {
+  console.warn('  ⚠️  Email not configured — doctor signup OTP will be shown on screen only, not sent.');
+  console.warn('     Set RESEND_API_KEY (recommended) or GMAIL_USER/GMAIL_APP_PASSWORD or SMTP_HOST/*.');
+}
 
 // Start MLLP/TCP server for lab instruments (optional)
 if (process.env.MLLP_ENABLED === 'true') {

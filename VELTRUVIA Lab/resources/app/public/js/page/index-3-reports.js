@@ -2208,7 +2208,7 @@ async function joinDoctorVideo(roomCode){
   `;
   document.body.appendChild(overlay);
   document.getElementById('doc-local-video').srcObject=_docLocalStream;
-  _docPc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  _docPc=new RTCPeerConnection(window.VELTRUVIA_RTC ? window.VELTRUVIA_RTC.rtcConfiguration() : {iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
   _docLocalStream.getTracks().forEach(t=>_docPc.addTrack(t,_docLocalStream));
   _docPc.onicecandidate=e=>{if(e.candidate)api('/sync/th/signal',{method:'POST',body:JSON.stringify({roomCode,type:'candidate',data:e.candidate,sender:'doctor'})})};
   _docPc.ontrack=e=>{document.getElementById('doc-remote-video').srcObject=e.streams[0]};

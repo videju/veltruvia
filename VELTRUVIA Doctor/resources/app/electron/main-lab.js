@@ -159,6 +159,8 @@ async function tryLoadExpress(port) {
     // ROOT = VELTRUVIA Lab/resources/app → go up 3 levels to E:\ve\data
     const sharedDataDir = join(ROOT, '..', '..', '..', 'data');
     try { mkdirSync(sharedDataDir, { recursive: true }); } catch {}
+    // Crash/error capture → data/error-log.jsonl (best-effort, never throws)
+    try { const { installErrorHandlers } = await import(pathToFileURL(join(ROOT, 'src', 'errors.js')).href); installErrorHandlers({ logPath: join(sharedDataDir, 'error-log.jsonl'), name: 'veltruvia-lab' }); } catch {}
     process.env.DB_PATH = join(sharedDataDir, 'veltruvia.db');
     // Load shared .env from E:\ve so all apps use the same PHI_ENCRYPTION_KEY
     try {

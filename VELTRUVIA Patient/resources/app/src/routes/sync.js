@@ -40,6 +40,118 @@ export const syncRouter = Router();
 const MAX_KEYS_PER_PUSH = 500;
 const MAX_KEY_LENGTH = 200;
 
+// ── Self-service password recovery (no second person required) ──────
+// Patients/Labs identify with MRN/username + the email on their account.
+// A single-use, 15-minute token is emailed; the reset only succeeds if it
+// matches. Responses are uniform whether or not the account exists.
+const recoveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many recovery attempts. Try again in 15 minutes.' },
+});
+const recoveryAttempts = new Map(); // ip → { count, windowStart } — second layer behind the proxy limiter
+function recoveryAllow(ip) {
+  const now = Date.now();
+  const rec = recoveryAttempts.get(ip);
+  if (!rec || now - rec.windowStart > 15 * 60 * 1000) {
+    recoveryAttempts.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+  rec.count += 1;
+  return rec.count <= 8;
+}
+
+function recoveryEmail(rec) {
+  if (rec.email) return String(rec.email).toLowerCase();
+  if (rec.meta && rec.meta.email) return String(rec.meta.email).toLowerCase();
+  return '';
+}
+
+function issueRecoveryToken(rec) {
+  const token = randomBytes(24).toString('base64url');
+  rec.resetTokenHash = createHash('sha256').update(token).digest('hex');
+  rec.resetExpires = new Date(15 * 60 * 1000 + Date.now()).toISOString();
+  return token;
+}
+
+const recoveryBodySchema = z.object({
+  mrn: z.string().min(1).max(40).optional(),
+  username: z.string().min(1).max(100).optional(),
+  email: z.string().email().max(200).transform(s => s.trim().toLowerCase()),
+  newPassword: z.string().min(6).max(200).optional(),
+});
+
+function findRecoveryTarget(store, mrn, username) {
+  if (mrn) return { key: mrn, rec: store[mrn] || null, passField: 'pass' };
+  if (username) {
+    for (const [k, v] of Object.entries(store)) {
+      if (v && typeof v === 'object' && v.username === username) {
+        return { key: k, rec: v, passField: 'password' };
+      }
+    }
+  }
+  return { key: null, rec: null, passField: null };
+}
+
+// Step 1: request a reset token (emailed; response is always uniform)
+syncRouter.post('/forgot-password', recoveryLimiter, validate(recoveryBodySchema), asyncHandler(async (req, res) => {
+  if (!recoveryAllow(req.ip)) return res.status(429).json({ error: 'Too many recovery attempts. Try again in 15 minutes.' });
+  const { mrn, username, email } = req.valid;
+  const store = readPatientStore();
+  const { rec } = findRecoveryTarget(store, mrn, username);
+  if (rec) {
+    const onFile = recoveryEmail(rec);
+    if (onFile && onFile === email && mailConfigured()) {
+      const token = issueRecoveryToken(rec);
+      try {
+        await sendMail({
+          to: onFile,
+        subject: 'VELTRUVIA — password reset code',
+          text: `Your VELTRUVIA password reset code is:\n\n${token}\n\nIt expires in 15 minutes. If you did not request this, ignore this email.`,
+        });
+        writePatientStore(store);
+      } catch { /* fall through to uniform response */ }
+    }
+  }
+  res.json({
+    ok: true,
+    message: mailConfigured()
+      ? 'If the account and email match, a reset code has been sent.'
+      : 'Email is not configured on this server — ask your doctor or lab administrator to reset the password for you.',
+  });
+}));
+
+// Step 2: complete the reset with the emailed token
+syncRouter.post('/reset-password', recoveryLimiter, validate(recoveryBodySchema.extend({ token: z.string().min(10).max(200) })), asyncHandler(async (req, res) => {
+  if (!recoveryAllow(req.ip)) return res.status(429).json({ error: 'Too many recovery attempts. Try again in 15 minutes.' });
+  const { mrn, username, newPassword, token } = req.valid;
+  if (!newPassword) return res.status(400).json({ error: 'New password is required.' });
+  const store = readPatientStore();
+  const { key, rec, passField } = findRecoveryTarget(store, mrn, username);
+  const fail = () => res.status(400).json({ error: 'Invalid or expired reset code.' });
+  if (!key || !rec || !rec.resetTokenHash || !rec.resetExpires) return fail();
+  if (new Date(rec.resetExpires).getTime() < Date.now()) {
+    delete rec.resetTokenHash; delete rec.resetExpires;
+    writePatientStore(store);
+    return fail();
+  }
+  const hash = createHash('sha256').update(token).digest('hex');
+  if (hash !== rec.resetTokenHash) return fail();
+
+  // Success: burn the token, set the new hashed password, revoke sessions.
+  delete rec.resetTokenHash; delete rec.resetExpires; delete rec.passPlain;
+  rec[passField] = hashUiPasswordV2(newPassword);
+  store[key] = rec;
+  writePatientStore(store);
+  try {
+    await db.prepare('UPDATE sessions SET revoked = 1 WHERE subject_id LIKE ? AND revoked = 0').run('%::' + key);
+  } catch { /* best-effort revocation */ }
+  await writeAudit({ actorId: key, actorRole: passField === 'pass' ? 'kv-patient' : 'kv-lab', action: 'sync.self_password_reset', targetId: key, ip: req.ip });
+  res.json({ ok: true, message: 'Password updated. Sign in with your new password.' });
+}));
+
 async function upsertKey(ownerId, k, v, now) {
   if (v === null || v === undefined) {
     await db.prepare('DELETE FROM kv_store WHERE owner_id = ? AND k = ?').run(ownerId, k);

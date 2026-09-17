@@ -185,11 +185,12 @@
     <div class="info-box">
       <h3>ℹ️ How It Works</h3>
       <p>
-        VELTRUVIA uses a local blockchain to create an immutable audit trail.
-        Every medical record operation is hashed and recorded on-chain, providing
-        tamper-proof verification. The actual encrypted records remain in the
-        secure database — only their cryptographic fingerprints are stored on the
-        blockchain.
+        VELTRUVIA keeps a hash-linked audit trail (a local, single-node chain).
+        Every medical record operation is hashed and chained to the previous
+        entry, so any later tampering with past entries is detectable. The
+        actual encrypted records remain in the secure database — only their
+        cryptographic fingerprints are stored in the chain. This is an audit
+        log with tamper evidence, not a distributed blockchain network.
       </p>
     </div>
   </div>

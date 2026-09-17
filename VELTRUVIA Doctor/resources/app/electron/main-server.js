@@ -27,6 +27,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import net from 'node:net';
 import { saveServerUrl } from './shared-config.js';
+import { setupAutoUpdate } from './updater.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -123,6 +124,8 @@ async function tryLoadExpress(port) {
     const sharedDataDir = join(sharedRoot, 'data');
     try { mkdirSync(sharedDataDir, { recursive: true }); } catch {}
     process.env.DB_PATH = join(sharedDataDir, 'veltruvia.db');
+    // Crash/error capture → data/error-log.jsonl (best-effort, never throws)
+    try { const { installErrorHandlers } = await import(pathToFileURL(join(ROOT, 'src', 'errors.js')).href); installErrorHandlers({ logPath: join(sharedDataDir, 'error-log.jsonl'), name: 'veltruvia-server' }); } catch {}
     // Load shared .env from the shared root so all apps use the same PHI_ENCRYPTION_KEY
     try {
       const dotenv = await import('dotenv');
@@ -222,6 +225,9 @@ ipcMain.handle('server:status', () => ({ ok: expressOk, port: serverPort }));
 // ── App lifecycle ─────────────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
+    // Auto-update via GitHub Releases (no-op in dev / before first release)
+    try { setupAutoUpdate(); } catch {}
+
     // Auto-start with Windows on first run (user can disable via tray menu).
     try {
       if (!app.getLoginItemSettings().wasOpenedAtLogin && !app.getLoginItemSettings().openAtLogin) {

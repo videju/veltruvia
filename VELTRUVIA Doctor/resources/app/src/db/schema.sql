@@ -135,6 +135,14 @@ CREATE TABLE IF NOT EXISTS password_change_requests (
   resolved_at TEXT,                         -- when approved/cancelled
   FOREIGN KEY (doctor_id) REFERENCES users(id)
 );
+-- ── Doctor self-service password recovery tokens (single-use, 15 min) ──
+CREATE TABLE IF NOT EXISTS password_resets (
+  email       TEXT PRIMARY KEY,
+  token_hash  TEXT NOT NULL,                -- sha256(token) — never the token itself
+  expires_at  TEXT NOT NULL,
+  created_at  TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_pcr_doctor ON password_change_requests(doctor_id);
 CREATE INDEX IF NOT EXISTS idx_pcr_mrn ON password_change_requests(mrn);
 

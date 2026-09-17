@@ -1,6 +1,11 @@
 {
   "appId": "com.veltruvia.doctor",
   "productName": "VELTRUVIA Doctor",
+  "publish": {
+    "provider": "github",
+    "owner": "sakshibiradar022002-wq",
+    "repo": "veltruvia1"
+  },
   "directories": {
     "output": "dist-desktop"
   },
@@ -33,6 +38,12 @@
     "target": [
       {
         "target": "dir",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "nsis",
         "arch": [
           "x64"
         ]

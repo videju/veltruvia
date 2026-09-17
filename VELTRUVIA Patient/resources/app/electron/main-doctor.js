@@ -7,6 +7,7 @@
  */
 
 import { app, BrowserWindow, shell, ipcMain, Menu, dialog, safeStorage } from 'electron';
+import { setupAutoUpdate } from './updater.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 
@@ -31,6 +32,7 @@ let httpServer = null;
 let centralServerUrl = null;
 let expressApp = null;
 let serverPort = 0;
+let dbInfo = { readOnly: false, impl: 'unknown' };
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -179,6 +181,8 @@ async function tryLoadExpress(port) {
     // ROOT = VELTRUVIA Doctor/resources/app → go up 3 levels to E:\ve\data
     const sharedDataDir = join(ROOT, '..', '..', '..', 'data');
     try { mkdirSync(sharedDataDir, { recursive: true }); } catch {}
+    // Crash/error capture → data/error-log.jsonl (best-effort, never throws)
+    try { const { installErrorHandlers } = await import(pathToFileURL(join(ROOT, 'src', 'errors.js')).href); installErrorHandlers({ logPath: join(sharedDataDir, 'error-log.jsonl'), name: 'veltruvia-doctor' }); } catch {}
     process.env.DB_PATH = join(sharedDataDir, 'veltruvia.db');
     // Load shared .env from E:\ve so all apps use the same PHI_ENCRYPTION_KEY
     try {
@@ -188,6 +192,12 @@ async function tryLoadExpress(port) {
     } catch {}
     const mod = await import(pathToFileURL(join(ROOT, 'src', 'app.js')).href);
     expressApp = mod.app;
+    // Capture DB mode for the read-only banner (same module instance app.js uses)
+    try {
+      const dbmod = await import(pathToFileURL(join(ROOT, 'src', 'db', 'index.js')).href);
+      dbInfo = { readOnly: !!dbmod.db?.readOnly, impl: dbmod.activeImpl() };
+      console.log(`[doctor] DB mode: ${dbInfo.impl} readOnly=${dbInfo.readOnly}`);
+    } catch { dbInfo = { readOnly: false, impl: 'unknown' }; }
     // Shared backup scheduler (no-op if the central Server already started it)
     try { const { startBackups } = await import(pathToFileURL(join(ROOT, 'src', 'db', 'backup.js')).href); startBackups(); } catch {}
     console.log('[doctor] ✅ Local Express API loaded');
@@ -253,6 +263,8 @@ function createWindow() {
 // IPC
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getPlatform', () => process.platform);
+// Read-only DB mode (fallback when the central Server owns the database)
+ipcMain.handle('app:getDbMode', () => dbInfo);
 // ── safeStorage bridge: OS-protected wrapping for the client-side PHI key ──
 ipcMain.handle('app:safeStorageIsAvailable', () => {
   try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
@@ -270,6 +282,9 @@ ipcMain.handle('blockchain:records', (_, mrn) => blockchain.getPatientRecords(mr
 // App lifecycle
 app.whenReady().then(async () => {
   try {
+    // Auto-update via GitHub Releases (no-op in dev / before first release)
+    try { setupAutoUpdate(); } catch {}
+
     serverPort = await findFreePort();
     httpServer = createServer(serveStatic);
     await new Promise((resolve, reject) => {

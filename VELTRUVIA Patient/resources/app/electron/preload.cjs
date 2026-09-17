@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('app', {
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   getDBPath: () => ipcRenderer.invoke('app:getDBPath'),
   getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
+  // DB mode info — used by the read-only banner in the Doctor app
+  getDbMode: () => ipcRenderer.invoke('app:getDbMode').catch(() => null),
   isElectron: true,
   // OS-level key protection for the local PHI encryption key
   // (DPAPI on Windows, Keychain on macOS, libsecret on Linux).

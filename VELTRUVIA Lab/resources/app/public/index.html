@@ -36,6 +36,7 @@
       <div class="fg"><label for="li-pass">Password</label><input id="li-pass" type="password" placeholder="••••••••"></div>
       <div id="li-totp-field" style="display:none"><div class="fg"><label for="li-totp">Authenticator Code</label><input id="li-totp" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="text-align:center;letter-spacing:4px;font-size:16px;"></div></div>
       <button class="btn btn-primary btn-full" style="margin-top:4px;" data-action="doLogin">Sign In →</button>
+      <div style="text-align:center;margin-top:10px;"><a href="#" data-recover="doctor" style="font-size:12px;color:var(--blue);text-decoration:none;">Forgot password?</a></div>
     </div>
     <div id="a-register" style="display:none;">
       <div class="msg err" id="reg-msg"></div>
@@ -744,6 +745,9 @@
 <script src="js/secure-store.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/telehealth-ws.js"></script>
+<script src="js/rtc-config.js"></script>
+<script src="js/readonly-banner.js"></script>
+<script src="js/recover.js"></script>
 <script src="js/page/index-1-helpers.js"></script>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -758,5 +762,6 @@
 
 <!-- Standalone mode: hide portal switcher when loaded from a separate app -->
 <script src="js/page/index-4-standalone.js"></script>
+<script src="js/push-client.js"></script>
 </body>
 </html>
