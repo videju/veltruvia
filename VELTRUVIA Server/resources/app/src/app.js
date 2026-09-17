@@ -67,17 +67,16 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
-      // SECURITY NOTE: script-src-attr allows inline onclick handlers.
-      // This is a known XSS risk — any user-controlled string in an onclick attribute
-      // could execute arbitrary JS. All user content MUST go through esc()/escAttr().
-      // TODO: Refactor to addEventListener to remove this unsafe-inline directive.
-      scriptSrcAttr: ["'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      // All page scripts are external files (js/, js/page/) — no inline
+      // scripts, no inline event handlers. Both unsafe-inline vectors are gone.
+      scriptSrc: ["'self'"],
+      // Fonts are self-hosted under /fonts/ (no third-party CDN dependency).
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'"],
       imgSrc: ["'self'", 'data:', 'blob:'],
       // api.emailjs.com: the EmailJS fallback sender XHRs there — without
       // this entry the browser silently blocks every EmailJS send.
+      // api.qrserver.com: renders the 2FA otpauth QR code.
       connectSrc: ["'self'", 'https://api.emailjs.com', 'https://api.qrserver.com'],
       manifestSrc: ["'self'"],
       workerSrc: ["'self'"],
@@ -96,6 +95,17 @@ app.use(sqlInjectionGuard);     // SQL injection pattern scanning
 app.use(pathTraversalGuard);    // Prevent directory traversal
 app.use(requestTimeout(30000)); // 30s request timeout
 
+// ── Native mobile app origins (Capacitor WebView) ────────────────
+// The Android/iOS APKs load their UI from the app bundle itself, so their
+// fetch() calls carry an Origin of https://localhost (Android WebView) or
+// capacitor://localhost (iOS) — which is NOT this server's host and would
+// otherwise trip the CSRF guard below. These apps authenticate with Bearer
+// tokens instead of cookies. Override with CAPACITOR_ORIGINS (empty to disable).
+const CAPACITOR_ORIGINS = new Set(
+  (process.env.CAPACITOR_ORIGINS ?? 'https://localhost,capacitor://localhost')
+    .split(',').map(s => s.trim()).filter(Boolean)
+);
+
 // ── CSRF guard: state-changing API calls must come from our own origin ──
 // (Hosting proxies may rewrite the session cookie to SameSite=None, which
 // would otherwise let cross-site pages fire authenticated writes.)
@@ -106,6 +116,8 @@ app.use('/api', (req, res, next) => {
   if (!origin) return next(); // non-browser clients (curl, tests, Electron) send no Origin
   // Allow file:// protocol (Electron desktop app)
   if (origin.startsWith('file://')) return next();
+  // Allow native mobile app origins (Capacitor APKs — Bearer-token auth)
+  if (CAPACITOR_ORIGINS.has(origin)) return next();
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   try {
     if (new URL(origin).host !== host) {
@@ -133,13 +145,16 @@ app.use((req, res, next) => {
 // ── CORS (production API access) ─────────────────────────────────
 if (config.isProd) {
   app.use('/api', (req, res, next) => {
-    const allowedOrigins = (process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+    const allowedOrigins = [
+      ...(process.env.CORS_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+      ...CAPACITOR_ORIGINS,
+    ];
     const origin = req.headers.origin;
     if (origin && allowedOrigins.length > 0 && allowedOrigins.includes(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Veltruvia-Native');
     }
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();

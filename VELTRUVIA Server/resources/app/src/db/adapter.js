@@ -13,9 +13,80 @@
 // All methods return promises so the same route code works against both the
 // in-process SQLite files and the remote Turso HTTP API.
 
-import { readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, openSync, closeSync, writeSync, unlinkSync, renameSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 
 let impl = null;
+
+// ── Advisory single-writer lock ────────────────────────────────────
+// The sql.js backend keeps the whole database in RAM and snapshots it to
+// disk every few seconds — two processes doing that to the same file
+// silently clobber each other (Server exe vs Doctor exe). A lock file
+// created with O_EXCL (atomic) lets exactly one process claim read-write
+// access; everyone else opens READ-ONLY and follows disk changes.
+// acquire uses a UNIQUE temp file + rename (atomic takeover, no
+// unlink-then-create race), and the content `<pid> <bootId>` defeats pid reuse.
+const bootId = randomBytes(8).toString('hex');
+
+function tryAcquireWriterLock(dbPath) {
+  const lockPath = dbPath + '.lock';
+  const tmpPath = `${lockPath}.${process.pid}.${bootId}.tmp`;
+  const claim = () => {
+    try {
+      const fd = openSync(tmpPath, 'wx');          // atomic create-if-not-exists
+      writeSync(fd, `${process.pid} ${bootId}`);
+      closeSync(fd);
+    } catch {
+      return false;                                // lost the temp-file race
+    }
+    try {
+      renameSync(tmpPath, lockPath);               // atomic takeover
+    } catch {
+      try { unlinkSync(tmpPath); } catch {}
+      return false;                                // someone else owns the lock
+    }
+    return true;
+  };
+
+  if (!existsSync(lockPath)) return claim();       // fast path: no lock yet
+
+  // Stale-holder check: reclaim ONLY on definitive proof the holder is gone
+  // (kill(pid,0) throwing ESRCH). Any other probe error (EPERM, unreadable
+  // lock, fs race) means "assume alive" — a wrong reclaim let a second
+  // process overwrite the file while the owner was still running.
+  try {
+    const [pidStr, bid] = readFileSync(lockPath, 'utf-8').trim().split(/\s+/);
+    const pid = parseInt(pidStr, 10);
+    if (pid === process.pid && bid === bootId) return true;    // already ours
+    if (!pid || !Number.isFinite(pid)) return false;            // unreadable → defer
+    try {
+      process.kill(pid, 0);
+      return false;                                             // holder alive
+    } catch (err) {
+      if (err && err.code !== 'ESRCH') return false;            // not provably dead
+      // ESRCH → holder is gone; the unique rename decides any reclaim race.
+      for (let i = 0; i < 5; i++) if (claim()) return true;
+      return false;
+    }
+  } catch { return false; }
+}
+
+function releaseWriterLock(dbPath) {
+  const lockPath = dbPath + '.lock';
+  try {
+    const [pidStr, bid] = readFileSync(lockPath, 'utf-8').trim().split(/\s+/);
+    if (parseInt(pidStr, 10) === process.pid && bid === bootId) unlinkSync(lockPath);
+  } catch {}
+}
+
+// Re-check ownership before every disk write: if we were presumed dead and
+// another process reclaimed, stop writing immediately.
+function stillOwnsWriterLock(dbPath) {
+  try {
+    const [pidStr, bid] = readFileSync(dbPath + '.lock', 'utf-8').trim().split(/\s+/);
+    return parseInt(pidStr, 10) === process.pid && bid === bootId;
+  } catch { return false; }
+}
 
 export async function openDatabase(path) {
   const tursoUrl = process.env.TURSO_DATABASE_URL || process.env.LIBSQL_URL;
@@ -52,6 +123,9 @@ export async function openDatabase(path) {
       const SQL = await initSqlJs();
       const fs = await import('node:fs');
       let db;
+      // Single-writer enforcement BEFORE loading: without this, a second
+      // VELTRUVIA process would snapshot over the first one's writes.
+      const canWrite = tryAcquireWriterLock(path);
       if (path === ':memory:') {
         db = new SQL.Database();
       } else {
@@ -62,8 +136,14 @@ export async function openDatabase(path) {
           db = new SQL.Database();
         }
       }
-      impl = 'sql.js';
-      return wrapSqlJs(SQL, db, path);
+      if (!canWrite) {
+        console.warn(`[db] ${path} is owned by another VELTRUVIA process (pid in ${path}.lock) — opening READ-ONLY.`);
+        console.warn('[db] Start the central Server first, or close this app: it will display data but not save changes.');
+      }
+      impl = canWrite ? 'sql.js' : 'sql.js (read-only)';
+      // 4th arg = readOnly — the INVERSE of canWrite (inverting these made
+      // the lock owner silently never flush — caught by hardening.test.mjs).
+      return wrapSqlJs(SQL, db, path, !canWrite);
     }
   }
 }
@@ -91,27 +171,41 @@ function wrapSync(db, pragma, dbPath) {
   };
 }
 
-function wrapSqlJs(SQL, initialDb, dbPath) {
+function wrapSqlJs(SQL, initialDb, dbPath, readOnly = false) {
   // Use a reference object so we can swap the db pointer on reload
   const ref = { db: initialDb };
   let lastMtime = 0;
   try { lastMtime = statSync(dbPath).mtimeMs; } catch {}
 
   const save = () => {
+    if (readOnly) return;                      // readers never write the file
+    if (!stillOwnsWriterLock(dbPath)) {        // ownership stolen (we were
+      console.warn('[db] writer lock lost — flushing disabled to avoid clobbering the new owner');
+      return;                                  //  presumed dead): stop writing
+    }
     try {
       const data = ref.db.export();
       writeFileSync(dbPath, Buffer.from(data));
       lastMtime = Date.now();
-    } catch {}
+    } catch (e) { console.error('[db] snapshot failed:', e && e.message); }
   };
 
-  // Reload from disk if another process wrote to it
+  // Reload from disk if another process wrote to it. Poison guard: never
+  // swap in a file that lacks the core schema — that would silently wipe
+  // every table out of RAM (observed as "no such table: sessions").
   const reloadIfChanged = () => {
     try {
       const st = statSync(dbPath);
       if (st.mtimeMs > lastMtime + 100) {
         const buf = readFileSync(dbPath);
         const newDb = new SQL.Database(buf);
+        const probe = newDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('kv_store','users') LIMIT 2");
+        if (!probe.length || probe[0].values.length < 2) {
+          console.warn('[db] on-disk database failed schema check — keeping in-memory state (no reload)');
+          newDb.close();
+          lastMtime = st.mtimeMs;      // don't re-log every tick
+          return;
+        }
         ref.db.close();
         ref.db = newDb;
         lastMtime = st.mtimeMs;
@@ -119,9 +213,10 @@ function wrapSqlJs(SQL, initialDb, dbPath) {
     } catch {}
   };
 
-  const intervalId = setInterval(save, 5000);
-  // Check for external writes every 2 seconds
-  const reloadId = setInterval(reloadIfChanged, 2000);
+  // Writers snapshot the full DB to disk every 5 s and also follow external
+  // reloads; READ-ONLY instances only follow the file the writer publishes.
+  const intervalId = readOnly ? setInterval(reloadIfChanged, 5000) : setInterval(save, 5000);
+  const reloadId = readOnly ? null : setInterval(reloadIfChanged, 2000);
 
   process.on('exit', save);
   process.on('SIGINT', () => { save(); process.exit(); });
@@ -183,12 +278,14 @@ function wrapSqlJs(SQL, initialDb, dbPath) {
     },
     close() {
       clearInterval(intervalId);
-      clearInterval(reloadId);
+      if (reloadId) clearInterval(reloadId);
       save();
+      if (!readOnly) releaseWriterLock(dbPath);
       ref.db.close();
     },
     flush() { save(); },
     name: dbPath,
+    get readOnly() { return readOnly; },
   };
 }
 
@@ -217,5 +314,6 @@ function wrapLibsql(client, url) {
     },
     close() { /* libsql client has no close method */ },
     name: url,
+    get readOnly() { return false; },
   };
 }

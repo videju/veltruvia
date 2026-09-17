@@ -8,8 +8,12 @@
     "src/**/*",
     "public/**/*",
     "electron/**/*",
+    "package.json",
     "node_modules/**/*",
-    "package.json"
+    "!node_modules/**/{test,__tests__,tests,spec,__mocks__,example,examples,docs,doc,bench,benchmark,benchmarks}/**",
+    "!node_modules/**/*.{md,markdown,map,ts,tsx,flow,d.ts,spec.js,test.js}",
+    "!node_modules/**/*.tsbuildinfo",
+    "!node_modules/**/{.github,.vscode,.idea,__pycache__,.travis.yml,tsconfig.json,tslint.json,.eslintrc,.babelrc,Gruntfile.js,Makefile}"
   ],
   "extraMetadata": {
     "main": "electron/main-patient.js"
@@ -24,7 +28,7 @@
       "to": "ffmpeg.dll"
     }
   ],
-  "asar": false,
+  "asar": true,
   "win": {
     "target": [
       {
@@ -47,5 +51,13 @@
     ],
     "icon": "public/icons/patient-512.png",
     "category": "Medical"
-  }
+  },
+  "asarUnpack": [
+    "node_modules/**/*.node"
+  ],
+  "compression": "maximum",
+  "electronLanguages": [
+    "en-US"
+  ],
+  "electronVersion": "33.0.0"
 }

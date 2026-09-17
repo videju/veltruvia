@@ -170,7 +170,7 @@ prescriptionRouter.get('/active', authenticate, requireRole('doctor', 'admin'),
 // ── Update prescription status ─────────────────────────────────────
 const updateRxSchema = z.object({
   prescriptionId: z.string().min(1),
-  status: z.enum(['completed', 'cancelled', 'expired', 'pending-refill']).optional(),
+  status: z.enum(['active', 'completed', 'cancelled', 'expired', 'pending-refill']).optional(),
   dosage: z.string().max(100).optional(),
   frequency: z.string().max(100).optional(),
   instructions: z.string().max(1000).optional(),

@@ -1,11 +1,14 @@
 /**
- * VELTRUVIA Server — Headless server-only Electron app
+ * VELTRUVIA Server — Background tray application
  *
- * Runs the shared backend. Shows a simple status window.
- * Doctor / Patient / Lab apps run fully self-contained now.
+ * Runs the shared backend silently in the system tray. No window is shown;
+ * a tray menu offers Status / Open dashboard / Run-at-startup toggle / Quit.
+ * Doctor (desktop) connects to this server; Patient and Lab connect as
+ * mobile APKs over the network. Everything is linked through this one
+ * always-on backend so all data is shared and saved on the server.
  */
 
-import { app, BrowserWindow, shell, ipcMain, Menu, dialog } from 'electron';
+import { app, Tray, Menu, shell, ipcMain, dialog, nativeImage } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 import { chdir } from 'node:process';
@@ -29,10 +32,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
 const PUBLIC = join(ROOT, 'public');
 
-let mainWindow = null;
+let tray = null;
 let httpServer = null;
 let expressApp = null;
 let serverPort = 0;
+let quitting = false;
+let expressOk = false;
+
+// ── Single instance: a second launch just re-shows status ─────────
+if (!app.requestSingleInstanceLock()) {
+  console.log('[server] Another instance is already running — exiting.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // A user double-launched the exe: no-op (the server is already running).
+    // Tray menu → Status confirms it.
+  });
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -91,7 +107,7 @@ async function tryLoadExpress(port) {
     const { app: electronApp } = await import('electron');
     const userData = electronApp.getPath('userData');
     const { mkdirSync } = await import('node:fs');
-    // SHARED database — same path used by all apps
+    // SHARED database — same path used by all desktop apps
     // ROOT = <install>\VELTRUVIA Server\resources\app → walk up to <install>, then use <install>\data
     // Find shared root dir: walk up until a directory contains two or more VELTRUVIA* app
     // folders (install root). Require directories so "VELTRUVIA Server.exe" doesn't false-positive.
@@ -115,6 +131,8 @@ async function tryLoadExpress(port) {
     } catch {}
     const mod = await import(pathToFileURL(join(ROOT, 'src', 'app.js')).href);
     expressApp = mod.app;
+    // Automated DB backups (default ON every 6 h, BACKUP_INTERVAL_MS=0 to disable)
+    try { const { startBackups } = await import(pathToFileURL(join(ROOT, 'src', 'db', 'backup.js')).href); startBackups(); } catch {}
     console.log('[server] Express API loaded');
     return true;
   } catch (err) {
@@ -126,86 +144,92 @@ async function tryLoadExpress(port) {
 
 function getLocalIP() {
   const nets = os.networkInterfaces();
+  const candidates = [];
   for (const name of Object.keys(nets)) {
     for (const iface of nets[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      if (iface.family === 'IPv4' && !iface.internal) candidates.push(iface.address);
     }
   }
-  return '127.0.0.1';
+  // Prefer real LAN ranges over virtual adapters (WSL/Docker use 172.x).
+  const score = (ip) =>
+    ip.startsWith('192.168.') ? 3 :
+    ip.startsWith('10.') ? 2 :
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ? 1 : 0;
+  return candidates.sort((a, b) => score(b) - score(a))[0] || '127.0.0.1';
 }
 
-function createWindow(port, lanIP) {
-  mainWindow = new BrowserWindow({
-    width: 480,
-    height: 400,
+// ── Tray ──────────────────────────────────────────────────────────
+function loadTrayIcon() {
+  // 256×256 PNG scales cleanly to the small tray size on Windows.
+  const iconPath = join(PUBLIC, 'icons', 'server-512.png');
+  try {
+    if (existsSync(iconPath)) return nativeImage.createFromPath(iconPath);
+  } catch {}
+  return nativeImage.createEmpty();
+}
+
+function statusText() {
+  const url = `http://127.0.0.1:${serverPort}`;
+  return expressOk
+    ? `VELTRUVIA Server is running\nAPI:  ${url}/health\nLocal: http://${getLocalIP()}:${serverPort}`
+    : `VELTRUVIA Server is starting…`;
+}
+
+function showStatusDialog() {
+  dialog.showMessageBox({
+    type: 'info',
     title: 'VELTRUVIA Server',
-    icon: join(PUBLIC, 'icons', 'server-512.png'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
-    titleBarStyle: 'hiddenInset',
-    backgroundColor: '#080d1a',
-    show: false,
-    resizable: false,
+    message: expressOk ? '✅ Server is running' : '⏳ Server is starting…',
+    detail: statusText(),
+    buttons: ['OK'],
   });
-
-  mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(getServerHTML(port, lanIP))}`);
-  mainWindow.once('ready-to-show', () => mainWindow.show());
-  mainWindow.on('closed', () => { mainWindow = null; });
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'VELTRUVIA Server', submenu: [
-      { label: '🔄  Restart Server', click: () => mainWindow?.webContents.reload() },
-      { type: 'separator' },
-      { role: 'toggleDevTools', accelerator: 'CmdOrCtrl+Shift+I' },
-    ]},
-    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'close' }] },
-  ]));
 }
 
-function getServerHTML(port, lanIP) {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VELTRUVIA Server</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<style>
-:root{--bg:#080d1a;--surface:#0f1729;--border:#1e2d4a;--text:#e2e8f0;--text-muted:#8494b2;--blue:#2563eb;--blue2:#1d4ed8;--green:#059669;--red:#dc2626;}
-*{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:'Plus Jakarta Sans',system-ui,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:40px 32px;display:flex;flex-direction:column;align-items:center;justify-content:center;-webkit-app-region:drag;user-select:none;overflow:hidden;}
-.drag-bar{position:fixed;top:0;left:0;right:0;height:38px;-webkit-app-region:drag;z-index:10;}
-.logo{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,var(--blue),var(--blue2));display:inline-flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 10px 40px rgba(37,99,235,.35);margin-bottom:20px;}
-h1{font-size:1.5rem;font-weight:800;letter-spacing:-.4px;margin-bottom:4px;}
-.sub{font-size:13px;color:var(--text-muted);margin-bottom:28px;}
-.status-badge{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:10px;font-size:13px;font-weight:600;margin-bottom:16px;}
-.status-badge.online{background:rgba(5,150,105,.1);border:1px solid rgba(5,150,105,.2);color:var(--green);}
-.pulse{width:8px;height:8px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
-@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(5,150,105,.4)}50%{opacity:.7;box-shadow:0 0 0 8px rgba(5,150,105,0)}}
-.info{font-size:12px;color:var(--text-muted);text-align:center;line-height:1.6;max-width:340px;}
-.footer{margin-top:24px;text-align:center;font-size:11px;color:#4a5f82;}
-.footer span{color:#34d399;}
-</style>
-</head>
-<body>
-<div class="drag-bar"></div>
-<div class="logo">🧬</div>
-<h1>VELTRUVIA Server</h1>
-<div class="sub">Neuro-oncology EMR — Backend Server</div>
-<div class="status-badge online" id="status"><div class="pulse"></div>Server Running</div>
-<div class="info">All client apps (Doctor, Patient, Lab) are now fully self-contained and run their own local servers. No manual connection needed.</div>
-<div class="footer">🔒 All data encrypted locally · <span>v2.0</span></div>
-</body>
-</html>`;
+function buildTray() {
+  tray = new Tray(loadTrayIcon());
+  tray.setToolTip('VELTRUVIA Server — running in background');
+  rebuildTrayMenu();
 }
 
-// ── IPC ───────────────────────────────────────────────────────────
+function rebuildTrayMenu() {
+  if (!tray) return;
+  const menu = Menu.buildFromTemplate([
+    { label: expressOk ? '● Server running' : '○ Server starting…', enabled: false },
+    { label: `Port ${serverPort || '—'} · 127.0.0.1` + (expressOk ? ` · LAN http://${getLocalIP()}:${serverPort}` : ''), enabled: false },
+    { type: 'separator' },
+    { label: 'Show status', click: showStatusDialog },
+    { label: 'Open dashboard in browser', click: () => {
+        shell.openExternal(`http://127.0.0.1:${serverPort}/`);
+      } },
+    { type: 'separator' },
+    { label: 'Run at Windows startup', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
+      click: (item) => {
+        app.setLoginItemSettings({ openAtLogin: item.checked, path: process.execPath });
+        console.log(`[server] openAtLogin → ${item.checked}`);
+      } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { quitting = true; app.quit(); } },
+  ]);
+  tray.setContextMenu(menu);
+}
+
+// ── IPC (kept for compatibility with scripts that query it) ───────
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getDBPath', () => join(app.getPath('userData'), 'data'));
 ipcMain.handle('app:getPlatform', () => process.platform);
+ipcMain.handle('server:status', () => ({ ok: expressOk, port: serverPort }));
 
 // ── App lifecycle ─────────────────────────────────────────────────
 app.whenReady().then(async () => {
   try {
+    // Auto-start with Windows on first run (user can disable via tray menu).
+    try {
+      if (!app.getLoginItemSettings().wasOpenedAtLogin && !app.getLoginItemSettings().openAtLogin) {
+        app.setLoginItemSettings({ openAtLogin: true, path: process.execPath });
+        console.log('[server] Registered for Windows startup');
+      }
+    } catch {}
+
     const PREFERRED_PORT = 3000;
     try {
       const testSrv = net.createServer();
@@ -222,28 +246,38 @@ app.whenReady().then(async () => {
       httpServer.on('error', reject);
     });
     console.log(`[server] Listening on port ${serverPort}`);
-    
-    // Save server URL for client apps to discover
-    const serverUrl = `http://127.0.0.1:${serverPort}`;
-    saveServerUrl(serverUrl);
+
+    // Save server URL for desktop client apps to discover
+    saveServerUrl(`http://127.0.0.1:${serverPort}`);
+
+    buildTray();
 
     // Load Express in background
     tryLoadExpress(serverPort).then(ok => {
-      if (mainWindow && ok) {
-        mainWindow.webContents.executeJavaScript(`
-          document.getElementById('status').className = 'status-badge online';
-          document.getElementById('status').innerHTML = '<div class="pulse"></div>Server Running';
-        `);
+      expressOk = ok;
+      rebuildTrayMenu();
+      if (ok) {
+        // Attach the telehealth WebSocket signaling to the same HTTP server.
+        // (src/server.js does this for node boots; without it here the exe's
+        // WebRTC signaling endpoint silently 404s on upgrade.)
+        import(pathToFileURL(join(ROOT, 'src', 'routes', 'telehealth.js')).href)
+          .then(({ attachTelehealthWs }) => {
+            attachTelehealthWs(httpServer);
+            console.log('[server] Telehealth WebSocket attached at /ws/telehealth');
+          })
+          .catch(err => console.error('[server] Telehealth WS attach failed:', err.message));
       }
     });
 
-    const lanIP = getLocalIP();
-    createWindow(serverPort, lanIP);
+    console.log(`[server] Ready — LAN: http://${getLocalIP()}:${serverPort}`);
   } catch (err) {
     dialog.showErrorBox('VELTRUVIA Server — Error', err.message || String(err));
     app.quit();
   }
 });
 
-app.on('window-all-closed', () => { if (httpServer) httpServer.close(); app.quit(); });
-app.on('before-quit', () => { if (httpServer) httpServer.close(); });
+// Keep running when the tray is destroyed by explorer.exe restarts etc.;
+// quitting only via the tray menu's Quit.
+app.on('window-all-closed', (e) => { /* tray app: stay alive */ });
+app.on('before-quit', () => { quitting = true; if (httpServer) httpServer.close(); });
+app.on('quit', () => { if (httpServer) httpServer.close(); });

@@ -1,6 +1,11 @@
 {
   "appId": "com.veltruvia.server",
   "productName": "VELTRUVIA Server",
+  "publish": {
+    "provider": "github",
+    "owner": "sakshibiradar022002-wq",
+    "repo": "veltruvia1"
+  },
   "directories": {
     "output": "dist-desktop"
   },
@@ -8,8 +13,12 @@
     "src/**/*",
     "public/**/*",
     "electron/**/*",
+    "package.json",
     "node_modules/**/*",
-    "package.json"
+    "!node_modules/**/{test,__tests__,tests,spec,__mocks__,example,examples,docs,doc,bench,benchmark,benchmarks}/**",
+    "!node_modules/**/*.{md,markdown,map,ts,tsx,flow,d.ts,spec.js,test.js}",
+    "!node_modules/**/*.tsbuildinfo",
+    "!node_modules/**/{.github,.vscode,.idea,__pycache__,.travis.yml,tsconfig.json,tslint.json,.eslintrc,.babelrc,Gruntfile.js,Makefile}"
   ],
   "extraMetadata": {
     "main": "electron/main-server.js"
@@ -24,12 +33,20 @@
       "to": "ffmpeg.dll"
     }
   ],
-  "asar": false,
+  "asar": true,
   "win": {
     "target": [
       {
         "target": "dir",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
       }
     ],
     "icon": "public/icons/server-512.png"
@@ -40,8 +57,19 @@
     "category": "public.app-category.medical"
   },
   "linux": {
-    "target": ["AppImage", "deb"],
+    "target": [
+      "AppImage",
+      "deb"
+    ],
     "icon": "public/icons/server-512.png",
     "category": "Medical"
-  }
+  },
+  "asarUnpack": [
+    "node_modules/**/*.node"
+  ],
+  "compression": "maximum",
+  "electronLanguages": [
+    "en-US"
+  ],
+  "electronVersion": "33.0.0"
 }

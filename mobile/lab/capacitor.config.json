@@ -1,0 +1,11 @@
+{
+  "appId": "com.veltruvia.lab",
+  "appName": "VELTRUVIA Lab",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

@@ -1,0 +1,13 @@
+# Caddy reverse proxy for VELTRUVIA — automatic HTTPS via Let's Encrypt.
+# VELTRUVIA_DOMAIN is set in .env / the environment (see docker-compose.yml).
+
+{
+	email {$ACME_EMAIL:admin@{$VELTRUVIA_DOMAIN}}
+}
+
+https://{$VELTRUVIA_DOMAIN} {
+	encode zstd gzip
+
+	# API + app UI + WebSocket signaling (/ws/telehealth), all on one origin.
+	reverse_proxy veltruvia:3000
+}

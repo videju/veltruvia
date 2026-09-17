@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld('app', {
   getDBPath: () => ipcRenderer.invoke('app:getDBPath'),
   getPlatform: () => ipcRenderer.invoke('app:getPlatform'),
   isElectron: true,
+  // OS-level key protection for the local PHI encryption key
+  // (DPAPI on Windows, Keychain on macOS, libsecret on Linux).
+  safeStorageIsAvailable: () => ipcRenderer.invoke('app:safeStorageIsAvailable'),
+  safeStorageEncrypt: (text) => ipcRenderer.invoke('app:safeStorageEncrypt', text),
+  safeStorageDecrypt: (b64) => ipcRenderer.invoke('app:safeStorageDecrypt', b64),
 });
 
 // ── Standalone Portal Isolation ──────────────────────────────────

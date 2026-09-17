@@ -27,7 +27,8 @@ function secret(name, bytes = 32) {
 }
 
 export const config = {
-  port: parseInt(process.env.PORT || '3000', 10),
+  // `|| 3000` also rescues PORT=0 (empty/0 must not yield an ephemeral port).
+  port: parseInt(process.env.PORT || '3000', 10) || 3000,
   isProd,
 
   // Network binding: 127.0.0.1 by default (LAN/private data stays local).

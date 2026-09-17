@@ -114,7 +114,7 @@ class Blockchain {
   }
 
   createGenesisBlock() {
-    return {
+    const genesis = {
       index: 0,
       timestamp: new Date().toISOString(),
       data: { type: 'genesis', message: 'VELTRUVIA Blockchain Initialized' },
@@ -122,6 +122,11 @@ class Blockchain {
       hash: '',
       app: 'system',
     };
+    // Self-hash the genesis so fileVerify() sees a consistent chain.
+    // (An empty hash here forced addBlock's `hash || recompute` fallback
+    // to chain onto a hash the stored genesis never carried.)
+    genesis.hash = this.calculateHash(genesis);
+    return genesis;
   }
 
   calculateHash(block) {

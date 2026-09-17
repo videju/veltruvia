@@ -6,7 +6,7 @@
  * NO server app needed — just open and use.
  */
 
-import { app, BrowserWindow, shell, ipcMain, Menu, dialog } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, Menu, dialog, safeStorage } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 
@@ -15,6 +15,7 @@ app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu');
 
 import { createServer } from 'node:http';
+import https from 'node:https';
 import { createReadStream, existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from 'node:fs';
 import net from 'node:net';
 import http from 'node:http';
@@ -27,6 +28,7 @@ const PUBLIC = join(ROOT, 'public');
 
 let mainWindow = null;
 let httpServer = null;
+let centralServerUrl = null;
 let expressApp = null;
 let serverPort = 0;
 
@@ -99,23 +101,31 @@ function serveStatic(req, res) {
 }
 
 async function probeServer(url, timeout = 2000) {
-  return new Promise((resolve) => {
-    const req = http.get(`${url}/api/health`, { timeout }, (res) => {
-      let data = '';
-      res.on('data', (c) => data += c);
-      res.on('end', () => resolve(res.statusCode === 200 ? url : null));
-    });
-    req.on('error', () => resolve(null));
-    req.on('timeout', () => { req.destroy(); resolve(null); });
-  });
+  // fetch handles both http:// (clinic PC) and https:// (cloud VM) and follows redirects.
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeout);
+    const res = await fetch(`${url}/api/health`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    return res.ok ? url : null;
+  } catch { return null; }
 }
 
 async function tryLoadExpress(port) {
-  // 1) Try shared config file first
-  let serverUrl = getServerUrl();
+  // 0) Explicit override wins (cloud deployments): VELTRUVIA_SERVER_URL env var
+  let serverUrl = (process.env.VELTRUVIA_SERVER_URL || '').replace(/\/+$/, '') || null;
   if (serverUrl) {
     const ok = await probeServer(serverUrl);
-    if (ok) { serverUrl = ok; } else { serverUrl = null; }
+    if (ok) { serverUrl = ok; console.log(`[doctor] Using VELTRUVIA_SERVER_URL: ${ok}`); }
+    else { console.warn(`[doctor] VELTRUVIA_SERVER_URL unreachable: ${serverUrl}`); serverUrl = null; }
+  }
+  // 1) Try shared config file next
+  if (!serverUrl) {
+    serverUrl = getServerUrl();
+    if (serverUrl) {
+      const ok = await probeServer(serverUrl);
+      if (ok) { serverUrl = ok; } else { serverUrl = null; }
+    }
   }
 
   // 2) If config didn't work, scan common ports for the Server
@@ -129,18 +139,20 @@ async function tryLoadExpress(port) {
   }
 
   if (serverUrl) {
+    centralServerUrl = serverUrl;
     console.log(`[doctor] ✅ Connected to central Server at ${serverUrl}`);
     // Proxy all API calls to the central Server
     expressApp = (req, res) => {
       const proxyUrl = new URL(req.url, serverUrl);
+      const transport = proxyUrl.protocol === 'https:' ? https : http;
       const options = {
         hostname: proxyUrl.hostname,
-        port: proxyUrl.port,
+        port: proxyUrl.port || (proxyUrl.protocol === 'https:' ? 443 : 80),
         path: proxyUrl.pathname + proxyUrl.search,
         method: req.method,
-        headers: { ...req.headers, host: proxyUrl.host },
+        headers: { ...req.headers, host: proxyUrl.host, origin: proxyUrl.origin },
       };
-      const proxyReq = http.request(options, (proxyRes) => {
+      const proxyReq = transport.request(options, (proxyRes) => {
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
         proxyRes.pipe(res);
       });
@@ -176,6 +188,8 @@ async function tryLoadExpress(port) {
     } catch {}
     const mod = await import(pathToFileURL(join(ROOT, 'src', 'app.js')).href);
     expressApp = mod.app;
+    // Shared backup scheduler (no-op if the central Server already started it)
+    try { const { startBackups } = await import(pathToFileURL(join(ROOT, 'src', 'db', 'backup.js')).href); startBackups(); } catch {}
     console.log('[doctor] ✅ Local Express API loaded');
   } catch (err) {
     console.error('[doctor] ⚠️ Express failed:', err.message);
@@ -239,6 +253,16 @@ function createWindow() {
 // IPC
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getPlatform', () => process.platform);
+// ── safeStorage bridge: OS-protected wrapping for the client-side PHI key ──
+ipcMain.handle('app:safeStorageIsAvailable', () => {
+  try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
+});
+ipcMain.handle('app:safeStorageEncrypt', (_, text) => {
+  try { return safeStorage.encryptString(String(text)).toString('base64'); } catch { return null; }
+});
+ipcMain.handle('app:safeStorageDecrypt', (_, b64) => {
+  try { return safeStorage.decryptString(Buffer.from(String(b64), 'base64')); } catch { return null; }
+});
 ipcMain.handle('blockchain:stats', () => blockchain.getStats());
 ipcMain.handle('blockchain:verify', () => blockchain.verify());
 ipcMain.handle('blockchain:records', (_, mrn) => blockchain.getPatientRecords(mrn));
@@ -253,6 +277,37 @@ app.whenReady().then(async () => {
       httpServer.on('error', reject);
     });
     console.log(`[doctor] Local server on port ${serverPort}`);
+
+    // Forward WebSocket upgrades (telehealth signaling) to the central Server.
+    // Registered unconditionally: centralServerUrl is resolved by tryLoadExpress
+    // moments after boot; later WS clients resolve it at request time.
+    httpServer.on('upgrade', (req, socket, head) => {
+      if (!centralServerUrl) { try { socket.destroy(); } catch {} return; }
+      const target = new URL(req.url, centralServerUrl);
+      const transport = target.protocol === 'https:' ? https : http;
+      const upstream = transport.request({
+        hostname: target.hostname,
+        port: target.port || (target.protocol === 'https:' ? 443 : 80),
+        path: target.pathname + target.search,
+        method: req.method,
+        headers: { ...req.headers, host: target.host },
+      });
+      upstream.on('upgrade', (upRes, upSocket, upHead) => {
+        const lines = ['HTTP/1.1 101 Switching Protocols'];
+        for (const [k, v] of Object.entries(upRes.headers)) lines.push(k + ': ' + v);
+        socket.write(lines.join('\r\n') + '\r\n\r\n');
+        if (upHead && upHead.length) socket.write(upHead);
+        upSocket.pipe(socket);
+        socket.pipe(upSocket);
+      });
+      upstream.on('response', (r2) => {
+        socket.write('HTTP/1.1 ' + r2.statusCode + '\r\n\r\n');
+        socket.end();
+      });
+      upstream.on('error', () => { try { socket.end(); } catch {} });
+      upstream.end(head);
+    });
+    console.log('[doctor] WS upgrade forwarding ready');
 
     await tryLoadExpress(serverPort);
     

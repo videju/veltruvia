@@ -1,9 +1,13 @@
 # ═══════════════════════════════════════════════════════════════════════
-# VELTRUVIA Docker Compose
-# Production deployment with persistent volumes
+# VELTRUVIA Docker Compose — cloud deployment
+#
+#   docker compose up -d            → API on :3000 (behind firewall/VPN only)
+#   VELTRUVIA_DOMAIN=emr.example.com docker compose --profile production up -d
+#                                   → HTTPS on :80/:443 via automatic Let's Encrypt
+#
+# Phones (Patient/Lab APKs) and the Doctor desktop app connect to
+# https://$VELTRUVIA_DOMAIN — all data is saved on this server.
 # ═══════════════════════════════════════════════════════════════════════
-
-version: '3.8'
 
 services:
   # ── VELTRUVIA EMR Server ──────────────────────────────────────────
@@ -14,28 +18,27 @@ services:
       target: production
     container_name: veltruvia-emr
     restart: unless-stopped
+    # Bind to loopback only when Caddy fronts it; expose :3000 directly otherwise.
     ports:
-      - "3000:3000"    # HTTP/HTTPS
-      - "2575:2575"    # MLLP/TCP (lab instruments)
+      - "${VELTRUVIA_BIND:-127.0.0.1}:3000:3000"
+      - "${MLLP_BIND:-127.0.0.1}:2575:2575"   # MLLP/TCP (lab instruments)
     environment:
       - NODE_ENV=production
       - PORT=3000
-      - JWT_SECRET=${JWT_SECRET:-$(openssl rand -hex 32)}
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env — see .env.cloud.example}
+      - PHI_ENCRYPTION_KEY=${PHI_ENCRYPTION_KEY:?set PHI_ENCRYPTION_KEY in .env — see .env.cloud.example}
       - DB_PATH=/app/data/veltruvia.db
-      - BACKUP_INTERVAL_MS=3600000  # Hourly backups
+      - BACKUP_INTERVAL_MS=${BACKUP_INTERVAL_MS:-3600000}
+      - MLLP_ENABLED=${MLLP_ENABLED:-false}
       - MLLP_PORT=2575
-      # TLS (optional — set paths to PEM files)
-      # - TLS_KEY=/app/certs/server.key
-      # - TLS_CERT=/app/certs/server.crt
-      # CORS origins (comma-separated)
-      - CORS_ORIGINS=http://localhost:3000,https://veltruvia.local
+      # Comma-separated extra origins (Capacitor app origins are always allowed)
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - CAPACITOR_ORIGINS=${CAPACITOR_ORIGINS:-https://localhost,capacitor://localhost}
       # Sentry error tracking (optional)
       # - SENTRY_DSN=https://your-dsn@sentry.io/project-id
     volumes:
       - veltruvia-data:/app/data        # SQLite database + backups
       - veltruvia-logs:/app/logs        # Application logs
-      # Uncomment for TLS:
-      # - ./certs:/app/certs:ro
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s
@@ -53,29 +56,38 @@ services:
     networks:
       - veltruvia-net
 
-  # ── Nginx Reverse Proxy (optional, for production TLS) ────────────
-  nginx:
-    image: nginx:alpine
+  # ── Caddy automatic-HTTPS reverse proxy (production) ──────────────
+  # Start with:  VELTRUVIA_DOMAIN=emr.example.com docker compose --profile production up -d
+  # Needs DNS A/AAAA record → this VM and open inbound 80 + 443.
+  caddy:
+    image: caddy:2-alpine
     container_name: veltruvia-proxy
     restart: unless-stopped
+    profiles: ["production"]
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - VELTRUVIA_DOMAIN=${VELTRUVIA_DOMAIN:?set VELTRUVIA_DOMAIN in .env or the environment}
+      - ACME_EMAIL=${ACME_EMAIL:-}
     volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./certs:/etc/nginx/certs:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
     depends_on:
       veltruvia:
         condition: service_healthy
     networks:
       - veltruvia-net
-    profiles:
-      - production
 
 volumes:
   veltruvia-data:
     driver: local
   veltruvia-logs:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
     driver: local
 
 networks:

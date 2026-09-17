@@ -1,0 +1,11 @@
+{
+  "appId": "com.veltruvia.patient",
+  "appName": "VELTRUVIA Patient",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

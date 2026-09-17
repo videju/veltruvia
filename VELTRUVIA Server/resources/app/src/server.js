@@ -14,7 +14,16 @@ import { startReminderScheduler } from './reminders.js';
 import { closeDb, flushDb } from './db/index.js';
 import { attachTelehealthWs } from './routes/telehealth.js';
 import { startMllpServer, getMllpStatus } from './hl7/mllp.js';
+import { mailConfigured } from './mail.js';
+import { startBackups } from './db/backup.js';
+import { installErrorHandlers } from './errors.js';
 import blockchain from './blockchain/index.js';
+
+// Crash/error capture first so even boot-time failures are recorded.
+installErrorHandlers({
+  logPath: path.join(process.env.DB_PATH ? path.dirname(process.env.DB_PATH) : '.', 'error-log.jsonl'),
+  name: 'veltruvia-server',
+});
 
 startAppointmentReminders();
 startReminderScheduler();
@@ -56,8 +65,14 @@ if (tlsKeyPath && tlsCertPath && fs.existsSync(tlsKeyPath) && fs.existsSync(tlsC
 // Attach WebSocket server for telehealth signaling
 attachTelehealthWs(server);
 
+// Surface missing mail config early — doctor signup depends on email OTP.
+if (!mailConfigured()) {
+  console.warn('  ⚠️  Email not configured — doctor signup OTP will be shown on screen only, not sent.');
+  console.warn('     Set RESEND_API_KEY (recommended) or GMAIL_USER/GMAIL_APP_PASSWORD or SMTP_HOST/*.');
+}
+
 // Start MLLP/TCP server for lab instruments (optional)
-if (process.env.MLLP_ENABLED !== 'false') {
+if (process.env.MLLP_ENABLED === 'true') {
   startMllpServer();
 }
 
@@ -67,7 +82,7 @@ server.listen(config.port, config.host, () => {
   console.log(`  Environment: ${config.isProd ? 'production' : 'development'}`);
   console.log(`  Health: ${proto}://localhost:${config.port}/health`);
   console.log(`  WebSocket: ${proto}://localhost:${config.port}/ws/telehealth`);
-  if (process.env.MLLP_ENABLED !== 'false') {
+  if (process.env.MLLP_ENABLED === 'true') {
     const mllp = getMllpStatus();
     console.log(`  MLLP/TCP: tcp://localhost:${mllp.port} (lab instruments)`);
   }
@@ -75,53 +90,9 @@ server.listen(config.port, config.host, () => {
 });
 
 // ── Automated database backups ────────────────────────────────────
-// Periodically checkpoint WAL and copy the DB file to a backups/ dir.
-const BACKUP_INTERVAL_MS = parseInt(process.env.BACKUP_INTERVAL_MS || '0', 10); // 0 = disabled
-const DB_BACKUP_DIR = path.join(path.dirname(config.dbPath || '.'), 'backups');
-
-function backupDatabase() {
-  try {
-    const dbPath = config.dbPath;
-    if (!dbPath || dbPath === ':memory:' || !fs.existsSync(dbPath)) return;
-
-    // Ensure backup directory exists
-    fs.mkdirSync(DB_BACKUP_DIR, { recursive: true });
-
-    // WAL checkpoint before copy
-    flushDb();
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const backupPath = path.join(DB_BACKUP_DIR, `veltruvia-${timestamp}.db`);
-    fs.copyFileSync(dbPath, backupPath);
-
-    // Also copy WAL and SHM files if they exist
-    try { fs.copyFileSync(dbPath + '-wal', backupPath + '-wal'); } catch {}
-    try { fs.copyFileSync(dbPath + '-shm', backupPath + '-shm'); } catch {}
-
-    // Prune old backups (keep last 30)
-    const backups = fs.readdirSync(DB_BACKUP_DIR)
-      .filter(f => f.startsWith('veltruvia-') && f.endsWith('.db'))
-      .sort()
-      .reverse();
-    while (backups.length > 30) {
-      const old = backups.pop();
-      try {
-        fs.unlinkSync(path.join(DB_BACKUP_DIR, old));
-        try { fs.unlinkSync(path.join(DB_BACKUP_DIR, old + '-wal')); } catch {}
-        try { fs.unlinkSync(path.join(DB_BACKUP_DIR, old + '-shm')); } catch {}
-      } catch {}
-    }
-
-    console.log(`[backup] Database backed up to ${backupPath} (${backups.length + 1} total)`);
-  } catch (err) {
-    console.error('[backup] Failed:', err.message);
-  }
-}
-
-if (BACKUP_INTERVAL_MS > 0) {
-  setInterval(backupDatabase, BACKUP_INTERVAL_MS);
-  console.log(`[backup] Automated backups every ${BACKUP_INTERVAL_MS / 1000}s → ${DB_BACKUP_DIR}`);
-}
+// Shared implementation (src/db/backup.js) — ON by default every 6 h,
+// override with BACKUP_INTERVAL_MS (0 = off).
+startBackups();
 
 // ── Graceful shutdown ─────────────────────────────────────────────
 function shutdown(signal) {

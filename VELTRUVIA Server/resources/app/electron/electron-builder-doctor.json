@@ -1,6 +1,11 @@
 {
   "appId": "com.veltruvia.doctor",
   "productName": "VELTRUVIA Doctor",
+  "publish": {
+    "provider": "github",
+    "owner": "sakshibiradar022002-wq",
+    "repo": "veltruvia1"
+  },
   "directories": {
     "output": "dist-desktop"
   },
@@ -8,8 +13,12 @@
     "src/**/*",
     "public/**/*",
     "electron/**/*",
+    "package.json",
     "node_modules/**/*",
-    "package.json"
+    "!node_modules/**/{test,__tests__,tests,spec,__mocks__,example,examples,docs,doc,bench,benchmark,benchmarks}/**",
+    "!node_modules/**/*.{md,markdown,map,ts,tsx,flow,d.ts,spec.js,test.js}",
+    "!node_modules/**/*.tsbuildinfo",
+    "!node_modules/**/{.github,.vscode,.idea,__pycache__,.travis.yml,tsconfig.json,tslint.json,.eslintrc,.babelrc,Gruntfile.js,Makefile}"
   ],
   "extraMetadata": {
     "main": "electron/main-doctor.js"
@@ -24,11 +33,17 @@
       "to": "ffmpeg.dll"
     }
   ],
-  "asar": false,
+  "asar": true,
   "win": {
     "target": [
       {
         "target": "dir",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "nsis",
         "arch": [
           "x64"
         ]
@@ -47,5 +62,13 @@
     ],
     "icon": "public/icons/doctor-512.png",
     "category": "Medical"
-  }
+  },
+  "asarUnpack": [
+    "node_modules/**/*.node"
+  ],
+  "compression": "maximum",
+  "electronLanguages": [
+    "en-US"
+  ],
+  "electronVersion": "33.0.0"
 }

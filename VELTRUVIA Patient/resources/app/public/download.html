@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Download VELTRUVIA Pro — Neuro-oncology EMR</title>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="/fonts/fonts.css" rel="stylesheet">
 <link rel="icon" type="image/png" href="/icons/doctor-192.png">
 <style>
 :root {
@@ -199,13 +199,15 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
 </style>
 </head>
 <body>
+<script src="js/actions.js"></script>
+<script src="js/ui.js"></script>
 
 <div class="hero">
   <div class="logo">🧬</div>
   <h1>VELTRUVIA Pro</h1>
-  <div class="badge"><span>v2.0</span> · Separate Apps · Shared Server</div>
+  <div class="badge"><span>v2.0</span> · Phone Apps + Doctor PC · Shared Server</div>
   <p class="subtitle">
-    Download the individual apps for each role. Each runs its own local server — no setup required.
+    Patient &amp; Lab install on <strong>Android phones</strong>. Doctor runs on Windows. One always-on server links them all — every record is saved on the server and shared instantly.
   </p>
 </div>
 
@@ -213,7 +215,7 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
 <div class="download-section">
   <div class="section-header">
     <h2>Choose Your App</h2>
-    <p>Install only what you need. All apps sync through the shared server.</p>
+    <p>All apps connect to one VELTRUVIA Server — install it first (cloud or clinic PC). Phones and the Doctor PC share everything through it.</p>
   </div>
 
   <div class="download-grid">
@@ -225,11 +227,11 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
         <div class="card-icon">🖥️</div>
         <div>
           <div class="card-title">Server</div>
-          <div class="card-subtitle">The Linking Software</div>
+          <div class="card-subtitle">The Linking Software — runs in background</div>
         </div>
       </div>
       <div class="card-desc">
-        Optional: Run this to create a shared server for multi-device sync. All apps work standalone without it.
+        Links every app and stores all data. On Windows it sits quietly in the system tray and starts automatically with your PC. For phones to connect from anywhere, deploy it to a cloud VM instead — see <strong>DEPLOY.md</strong>.
       </div>
       <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Server.exe" download>
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
@@ -237,8 +239,8 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
       </a>
       <div class="download-meta">
         <span>📦 ~80 MB</span>
-        <span>💻 Windows 10/11</span>
-        <span>🔌 No install</span>
+        <span>💻 Windows 10/11 · ☁️ Cloud</span>
+        <span>system tray</span>
       </div>
     </div>
 
@@ -249,11 +251,11 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
         <div class="card-icon">👨‍⚕️</div>
         <div>
           <div class="card-title">Doctor Software</div>
-          <div class="card-subtitle">EMR & Patient Management</div>
+          <div class="card-subtitle">Windows · EMR & Patient Management</div>
         </div>
       </div>
       <div class="card-desc">
-        Full EMR dashboard with patient records, appointment scheduling, clinical notes, lab management, billing, and video calls.
+        Full EMR dashboard with patient records, appointment scheduling, clinical notes, lab management, billing, and video calls. Connects to the shared server automatically.
       </div>
       <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Doctor.exe" download>
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
@@ -268,49 +270,49 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
 
     <!-- Patient -->
     <div class="download-card patient">
-      <div class="card-badge optional">Patient</div>
+      <div class="card-badge optional">Mobile</div>
       <div class="card-header">
         <div class="card-icon">📱</div>
         <div>
           <div class="card-title">Patient App</div>
-          <div class="card-subtitle">Symptom Tracker & Care</div>
+          <div class="card-subtitle">Android · Symptom Tracker & Care</div>
         </div>
       </div>
       <div class="card-desc">
-        Log daily symptoms, track medications, view appointments, message your care team, and access treatment information.
+        Log daily symptoms, track medications, view appointments, and message your care team — right from your phone. Everything syncs to the server.
       </div>
-      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Patient.exe" download>
+      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Patient.apk" download>
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-        Download Patient (.exe)
+        Download Patient (.apk)
       </a>
       <div class="download-meta">
-        <span>📦 ~80 MB</span>
-        <span>💻 Windows 10/11</span>
-        <span>🔌 No install</span>
+        <span>📦 ~10 MB</span>
+        <span>🤖 Android 8+</span>
+        <span>iPhone → Add to Home Screen</span>
       </div>
     </div>
 
     <!-- Lab -->
     <div class="download-card lab">
-      <div class="card-badge optional">Lab</div>
+      <div class="card-badge optional">Mobile</div>
       <div class="card-header">
         <div class="card-icon">🔬</div>
         <div>
           <div class="card-title">Lab Portal</div>
-          <div class="card-subtitle">Test Management & Results</div>
+          <div class="card-subtitle">Android · Test Management & Results</div>
         </div>
       </div>
       <div class="card-desc">
-        Manage lab test orders, upload results, track sample status, and communicate with doctors about pending results.
+        Manage lab test orders, upload results, and track sample status from any phone. Task lists arrive from the doctor in real time.
       </div>
-      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Lab.exe" download>
+      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Lab.apk" download>
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-        Download Lab (.exe)
+        Download Lab (.apk)
       </a>
       <div class="download-meta">
-        <span>📦 ~80 MB</span>
-        <span>💻 Windows 10/11</span>
-        <span>🔌 No install</span>
+        <span>📦 ~10 MB</span>
+        <span>🤖 Android 8+</span>
+        <span>iPhone → Add to Home Screen</span>
       </div>
     </div>
 
@@ -323,22 +325,22 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
   <div class="step">
     <div class="step-num">1</div>
     <div class="step-text">
-      <h3>Download & Open</h3>
-      <p>Download any app and open it — <strong>no server setup needed</strong>. Each app runs its own local server automatically.</p>
+      <h3>Install the Server</h3>
+      <p>The VELTRUVIA Server runs in the background (system tray on Windows, or a cloud VM — see <strong>DEPLOY.md</strong>). It links every app and stores all data.</p>
     </div>
   </div>
   <div class="step">
     <div class="step-num">2</div>
     <div class="step-text">
-      <h3>Register or Login</h3>
-      <p>Create an account or sign in with your credentials. No server address required.</p>
+      <h3>Install Your App</h3>
+      <p>Patient &amp; Lab: download the APK on an Android phone. Doctor: install the Windows software. Sign in with your credentials — no server address needed.</p>
     </div>
   </div>
   <div class="step">
     <div class="step-num">3</div>
     <div class="step-text">
-      <h3>Start Using</h3>
-      <p>All features work instantly — patient records, scheduling, lab results, and messaging.</p>
+      <h3>Everything Stays in Sync</h3>
+      <p>A symptom logged on a phone appears in the Doctor software instantly. Lab results reach the patient the moment they're uploaded. All data is saved on the server.</p>
     </div>
   </div>
 </div>
@@ -374,8 +376,8 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
     </div>
     <div class="feature">
       <div class="feature-icon">⚡</div>
-      <h3>Portable & Fast</h3>
-      <p>Single .exe per app. No installation needed. Run from USB drive. Launches in seconds.</p>
+      <h3>Works Everywhere</h3>
+      <p>Android APKs for phones, Windows software for the doctor, background server on PC or cloud.</p>
     </div>
   </div>
 </div>
@@ -385,20 +387,20 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
   <h2>System Requirements</h2>
   <div class="req-grid">
     <div class="req-item">
-      <div class="label">Operating System</div>
-      <div class="value">Windows 10 or 11 (64-bit)</div>
+      <div class="label">Doctor PC</div>
+      <div class="value">Windows 10/11 (64-bit), 4 GB RAM</div>
     </div>
     <div class="req-item">
-      <div class="label">RAM</div>
-      <div class="value">4 GB minimum</div>
+      <div class="label">Phones</div>
+      <div class="value">Android 8+ (iPhone: browser install)</div>
     </div>
     <div class="req-item">
-      <div class="label">Disk Space</div>
-      <div class="value">200 MB per app</div>
+      <div class="label">Server</div>
+      <div class="value">Cloud VM or clinic PC (always on)</div>
     </div>
     <div class="req-item">
       <div class="label">Network</div>
-      <div class="value">Required for sync</div>
+      <div class="value">Internet for phone sync</div>
     </div>
   </div>
 </div>

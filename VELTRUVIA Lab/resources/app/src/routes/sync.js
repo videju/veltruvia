@@ -306,10 +306,10 @@ syncRouter.post('/patient-login', loginLimiter, validate(patientLoginSchema), as
   await kvClear('pat:' + mrn);
 
   // Session subject encodes which doctor's keyspace this patient lives in.
-  await createSession(res, { subjectId: `${ownerId}::${mrn}`, subjectType: 'kv-patient', role: 'kv-patient' });
+  const session = await createSession(res, { subjectId: `${ownerId}::${mrn}`, subjectType: 'kv-patient', role: 'kv-patient' });
   await writeAudit({ actorId: mrn, actorRole: 'kv-patient', action: 'sync.patient_login', targetId: ownerId, ip: req.ip });
 
-  res.json({ ok: true, mrn, keys: await collectPatientKeys(ownerId, mrn) });
+  res.json({ ok: true, mrn, ...(req.headers['x-veltruvia-native'] === '1' ? { token: session.token } : {}), keys: await collectPatientKeys(ownerId, mrn) });
 }));
 
 function patientScope(req, res, next) {
@@ -417,14 +417,14 @@ syncRouter.post('/lab-login', loginLimiter, validate(labLoginSchema), asyncHandl
   await kvClear('lab:' + username);
 
   const { ownerId, rec } = found;
-  await createSession(res, {
+  const session = await createSession(res, {
     subjectId: `${ownerId}::${rec.docId}::${rec.labId}`,
     subjectType: 'kv-lab',
     role: 'kv-lab',
   });
   await writeAudit({ actorId: rec.labId, actorRole: 'kv-lab', action: 'sync.lab_login', targetId: ownerId, ip: req.ip });
 
-  res.json({ ok: true, labId: rec.labId, keys: await collectLabKeys(ownerId, rec.docId, rec.labId) });
+  res.json({ ok: true, labId: rec.labId, ...(req.headers['x-veltruvia-native'] === '1' ? { token: session.token } : {}), keys: await collectLabKeys(ownerId, rec.docId, rec.labId) });
 }));
 
 function labScope(req, res, next) {
@@ -834,7 +834,7 @@ syncRouter.post('/store-login', loginLimiter, validate(storeLoginSchema), asyncH
 
   // Issue a real session (mirrors /patient-login) so authenticated endpoints
   // like /sync/patient and the telehealth routes work for store-based accounts.
-  await createSession(res, { subjectId: `${pat.docId || 'store'}::${mrn}`, subjectType: 'kv-patient', role: 'kv-patient' });
+  const session = await createSession(res, { subjectId: `${pat.docId || 'store'}::${mrn}`, subjectType: 'kv-patient', role: 'kv-patient' });
 
   // One-time legacy migration: re-hash any plaintext credential in place and
   // strip passPlain so the plaintext path can never fire twice.
@@ -851,6 +851,7 @@ syncRouter.post('/store-login', loginLimiter, validate(storeLoginSchema), asyncH
   res.json({
     ok: true,
     mrn,
+    ...(req.headers['x-veltruvia-native'] === '1' ? { token: session.token } : {}),
     patient: safePatient,
     keys: { ['pat_' + mrn]: { v: safePatient } },
   });
@@ -876,10 +877,12 @@ syncRouter.post('/lab-store-login', loginLimiter, validate(labStoreLoginSchema),
             writePatientStore(store);
           } catch { /* best-effort */ }
         }
-        await createSession(res, { subjectId: v.labId, subjectType: 'kv-lab', role: 'kv-lab' });
-        // SECURITY: Never return password hashes to the client
+        // Session subject must match labScope's ownerId::docId::labId shape —
+        // a bare labId here would 401 every later GET/PUT /sync/lab call.
+        const session = await createSession(res, { subjectId: `${v.docId}::${v.docId}::${v.labId}`, subjectType: 'kv-lab', role: 'kv-lab' });
+        // SECURITY: Never return password hashes or plaintext passwords to the client
         const safeLab = { labId: v.labId, username: v.username, name: v.name, docId: v.docId };
-        res.json({ ok: true, lab: safeLab });
+        res.json({ ok: true, lab: safeLab, ...(req.headers['x-veltruvia-native'] === '1' ? { token: session.token } : {}), keys: await collectLabKeys(v.docId, v.docId, v.labId) });
         return;
       }
     }

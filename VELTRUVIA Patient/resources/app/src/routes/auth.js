@@ -161,11 +161,14 @@ authRouter.post('/login', validate(loginSchema), asyncHandler(async (req, res) =
   }
 
   await db.prepare('UPDATE users SET last_login = ? WHERE id = ?').run(new Date().toISOString(), user.id);
-  await createSession(res, { subjectId: user.id, subjectType: 'user', role: user.role });
+  const session = await createSession(res, { subjectId: user.id, subjectType: 'user', role: user.role });
   await writeAudit({ actorId: user.id, actorRole: user.role, action: 'user.login', targetId: user.id, ip: req.ip });
 
   res.json({
     ok: true,
+    // Bearer token ONLY for native clients (mobile APKs) that don't persist
+    // cookies — keeps browser responses free of exfiltratable credentials.
+    ...(req.headers['x-veltruvia-native'] === '1' ? { token: session.token } : {}),
     user: {
       id: user.id, email: user.email, role: user.role,
       name: decryptPHI(user.name_enc),

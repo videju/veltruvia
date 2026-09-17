@@ -8,6 +8,8 @@ import { randomToken } from '../crypto.js';
 const COOKIE_NAME = 'cc_session';
 
 // ── Issue a session ───────────────────────────────────────────────
+// Returns { jti, token } — the token lets native apps (Capacitor APKs)
+// authenticate via the Authorization header where cookies aren't ideal.
 export async function createSession(res, { subjectId, subjectType, role }) {
   const jti = randomToken(16);
   const now = new Date();
@@ -27,6 +29,12 @@ export async function createSession(res, { subjectId, subjectType, role }) {
     { expiresIn: `${config.sessionTtlMinutes}m` }
   );
 
+  // NOTE: `partitioned: true` (CHIPS) is deliberately NOT set. The CHIPS
+  // spec requires the Secure attribute, and browsers silently drop
+  // Secure-partitioned cookies delivered over plain HTTP — which is how
+  // the Electron desktop apps serve the UI by default. With partitioned
+  // set, login succeeded but the session cookie was never persisted, so
+  // every subsequent request 401'd (masked by the localStorage fallback).
   res.cookie(COOKIE_NAME, token, {
     httpOnly: true,                 // JS cannot read it → XSS-resistant
     secure: config.isProd,          // HTTPS-only in production
@@ -34,10 +42,9 @@ export async function createSession(res, { subjectId, subjectType, role }) {
     maxAge: config.sessionTtlMinutes * 60 * 1000,
     path: '/',
     priority: 'high',               // Ensure cookie is sent early
-    partitioned: true,              // CHIPS: partition cookies for cross-site isolation
   });
 
-  return jti;
+  return { jti, token };
 }
 
 // ── Revoke (logout) ───────────────────────────────────────────────
@@ -53,7 +60,10 @@ export function clearSessionCookie(res) {
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes idle timeout
 
 export async function authenticate(req, res, next) {
-  const token = req.cookies?.[COOKIE_NAME];
+  // Cookie first (desktop apps + browser UI), then Authorization: Bearer
+  // (native mobile apps — Capacitor WebView can't rely on httpOnly cookies).
+  const token = req.cookies?.[COOKIE_NAME]
+    || (String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i)?.[1] ?? null);
   if (!token) return res.status(401).json({ error: 'Not authenticated' });
 
   let payload;

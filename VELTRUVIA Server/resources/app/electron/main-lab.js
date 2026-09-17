@@ -6,7 +6,7 @@
  * NO server app needed — just open and use.
  */
 
-import { app, BrowserWindow, shell, ipcMain, Menu, dialog } from 'electron';
+import { app, BrowserWindow, shell, ipcMain, Menu, dialog, safeStorage } from 'electron';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, extname, relative, isAbsolute } from 'node:path';
 
@@ -27,6 +27,7 @@ const PUBLIC = join(ROOT, 'public');
 
 let mainWindow = null;
 let httpServer = null;
+let centralServerUrl = null;
 let expressApp = null;
 let serverPort = 0;
 
@@ -120,6 +121,7 @@ async function tryLoadExpress(port) {
   }
 
   if (serverUrl) {
+    centralServerUrl = serverUrl;
     console.log(`[lab] ✅ Connected to central Server at ${serverUrl}`);
     expressApp = (req, res) => {
       const proxyUrl = new URL(req.url, serverUrl);
@@ -128,7 +130,7 @@ async function tryLoadExpress(port) {
         port: proxyUrl.port,
         path: proxyUrl.pathname + proxyUrl.search,
         method: req.method,
-        headers: { ...req.headers, host: proxyUrl.host },
+        headers: { ...req.headers, host: proxyUrl.host, origin: proxyUrl.origin },
       };
       const proxyReq = http.request(options, (proxyRes) => {
         res.writeHead(proxyRes.statusCode, proxyRes.headers);
@@ -157,6 +159,8 @@ async function tryLoadExpress(port) {
     // ROOT = VELTRUVIA Lab/resources/app → go up 3 levels to E:\ve\data
     const sharedDataDir = join(ROOT, '..', '..', '..', 'data');
     try { mkdirSync(sharedDataDir, { recursive: true }); } catch {}
+    // Crash/error capture → data/error-log.jsonl (best-effort, never throws)
+    try { const { installErrorHandlers } = await import(pathToFileURL(join(ROOT, 'src', 'errors.js')).href); installErrorHandlers({ logPath: join(sharedDataDir, 'error-log.jsonl'), name: 'veltruvia-lab' }); } catch {}
     process.env.DB_PATH = join(sharedDataDir, 'veltruvia.db');
     // Load shared .env from E:\ve so all apps use the same PHI_ENCRYPTION_KEY
     try {
@@ -228,6 +232,16 @@ function createWindow() {
 
 ipcMain.handle('app:getVersion', () => app.getVersion());
 ipcMain.handle('app:getPlatform', () => process.platform);
+// ── safeStorage bridge: OS-protected wrapping for the client-side PHI key ──
+ipcMain.handle('app:safeStorageIsAvailable', () => {
+  try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
+});
+ipcMain.handle('app:safeStorageEncrypt', (_, text) => {
+  try { return safeStorage.encryptString(String(text)).toString('base64'); } catch { return null; }
+});
+ipcMain.handle('app:safeStorageDecrypt', (_, b64) => {
+  try { return safeStorage.decryptString(Buffer.from(String(b64), 'base64')); } catch { return null; }
+});
 ipcMain.handle('blockchain:stats', () => blockchain.getStats());
 ipcMain.handle('blockchain:records', (_, mrn) => blockchain.getPatientRecords(mrn));
 
@@ -237,6 +251,36 @@ app.whenReady().then(async () => {
     httpServer = createServer(serveStatic);
     await new Promise((resolve, reject) => { httpServer.listen(serverPort, '127.0.0.1', resolve); httpServer.on('error', reject); });
     console.log(`[lab] Local server on port ${serverPort}`);
+
+    // Forward WebSocket upgrades (telehealth signaling) to the central Server.
+    // Registered unconditionally: centralServerUrl is resolved by tryLoadExpress
+    // moments after boot; later WS clients resolve it at request time.
+    httpServer.on('upgrade', (req, socket, head) => {
+      if (!centralServerUrl) { try { socket.destroy(); } catch {} return; }
+      const target = new URL(req.url, centralServerUrl);
+      const upstream = http.request({
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname + target.search,
+        method: req.method,
+        headers: { ...req.headers, host: target.host },
+      });
+      upstream.on('upgrade', (upRes, upSocket, upHead) => {
+        const lines = ['HTTP/1.1 101 Switching Protocols'];
+        for (const [k, v] of Object.entries(upRes.headers)) lines.push(k + ': ' + v);
+        socket.write(lines.join('\r\n') + '\r\n\r\n');
+        if (upHead && upHead.length) socket.write(upHead);
+        upSocket.pipe(socket);
+        socket.pipe(upSocket);
+      });
+      upstream.on('response', (r2) => {
+        socket.write('HTTP/1.1 ' + r2.statusCode + '\r\n\r\n');
+        socket.end();
+      });
+      upstream.on('error', () => { try { socket.end(); } catch {} });
+      upstream.end(head);
+    });
+    console.log('[lab] WS upgrade forwarding ready');
 
     await tryLoadExpress(serverPort);
     blockchain.recordAudit('app_started', { app: 'lab', port: serverPort }, 'lab');

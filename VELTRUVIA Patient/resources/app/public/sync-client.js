@@ -51,13 +51,19 @@
   }
 
   // Server wins only where its copy is newer than what we last synced.
+  // Values go through SecureStore (encrypted-at-rest) when available.
   function mergeKeys(keys) {
     var m = meta();
     var applied = 0;
+    var SS = window.SecureStore;
     for (var k in (keys || {})) {
       var entry = keys[k];
       if (!m[k] || entry.ts > m[k]) {
-        try { localStorage.setItem('cc_' + k, JSON.stringify(entry.v)); applied++; } catch (e) {}
+        try {
+          if (SS) SS.set(k, entry.v);
+          else localStorage.setItem('cc_' + k, JSON.stringify(entry.v));
+          applied++;
+        } catch (e) {}
         m[k] = entry.ts;
       }
     }
@@ -67,12 +73,35 @@
 
   function collectAllLocal() {
     var out = {};
-    for (var i = 0; i < localStorage.length; i++) {
-      var k = localStorage.key(i);
+    var SS = window.SecureStore;
+    if (SS) {
+      var names = SS.names();
+      for (var i = 0; i < names.length; i++) {
+        var v = SS.peek(names[i]);
+        if (v !== undefined && v !== null) out[names[i]] = v;
+      }
+      return out;
+    }
+    for (var j = 0; j < localStorage.length; j++) {
+      var k = localStorage.key(j);
       if (!k || k.indexOf('cc_') !== 0 || k === META_KEY) continue;
       try { out[k.slice(3)] = JSON.parse(localStorage.getItem(k)); } catch (e) {}
     }
     return out;
+  }
+
+  // Raw value reader used by the push paths: reads through SecureStore's
+  // cache so encrypted entries work. undefined = unknown → skip.
+  function rawValue(name) {
+    var SS = window.SecureStore;
+    if (SS) {
+      var v = SS.peek(name);
+      return v === undefined ? undefined : (v === null ? null : v);
+    }
+    var raw = null;
+    try { raw = localStorage.getItem('cc_' + name); } catch (e) {}
+    if (raw === null) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
   }
 
   function schedulePush() {
@@ -87,8 +116,9 @@
     state.dirty.clear();
     var changes = {};
     keys.forEach(function (k) {
-      var raw = localStorage.getItem('cc_' + k);
-      try { changes[k] = raw === null ? null : JSON.parse(raw); } catch (e) { changes[k] = null; }
+      var v = rawValue(k);
+      if (v === undefined) return; // unknown (never cached) — don't clobber server
+      changes[k] = v;
     });
     state.pushing = true;
     try {
@@ -111,18 +141,24 @@
   var origDel = Storage.prototype.removeItem;
   Storage.prototype.setItem = function (k, v) {
     origSet.call(this, k, v);
-    if (this === window.localStorage && typeof k === 'string' && k.indexOf('cc_') === 0 && k !== META_KEY) {
+    if (this === window.localStorage && typeof k === 'string' && k.indexOf('cc_') === 0 && k !== META_KEY && k.indexOf('ccenc_') !== 0 && k.indexOf('cc__') !== 0) {
       state.dirty.add(k.slice(3));
       schedulePush();
     }
   };
   Storage.prototype.removeItem = function (k) {
     origDel.call(this, k);
-    if (this === window.localStorage && typeof k === 'string' && k.indexOf('cc_') === 0 && k !== META_KEY) {
+    if (this === window.localStorage && typeof k === 'string' && k.indexOf('cc_') === 0 && k !== META_KEY && k.indexOf('ccenc_') !== 0 && k.indexOf('cc__') !== 0) {
       state.dirty.add(k.slice(3));
       schedulePush();
     }
   };
+  // SecureStore path: encrypted writes land on ccenc_* keys, so listen to
+  // its write events instead of the raw storage interception.
+  window.addEventListener('secure-store:write', function (e) {
+    if (!e.detail || typeof e.detail.name !== 'string') return;
+    if (state.mode) { state.dirty.add(e.detail.name); schedulePush(); }
+  });
 
   // Patient/lab portals: poll for new server data (e.g. a task assigned by
   // the doctor after login) and refresh the task list when something changed.
@@ -163,8 +199,9 @@
     if (!state.online || state.dirty.size === 0) return;
     var changes = {};
     state.dirty.forEach(function (k) {
-      var raw = localStorage.getItem('cc_' + k);
-      try { changes[k] = raw === null ? null : JSON.parse(raw); } catch (e) { changes[k] = null; }
+      var v = rawValue(k);
+      if (v === undefined) return;
+      changes[k] = v;
     });
     try {
       fetch(pushUrl(), {
@@ -191,7 +228,7 @@
       } catch (e) {
         // Account has TOTP 2FA enabled — ask for the authenticator code and retry.
         if (e.status === 401 && /totp/i.test(e.message || '')) {
-          var code = prompt('\ud83d\udd10 Two-factor authentication is enabled.\nEnter the 6-digit code from your authenticator app:');
+          var code = await AppDialog.prompt('\ud83d\udd10 Two-factor authentication is enabled.\nEnter the 6-digit code from your authenticator app:');
           if (!code) throw e;
           await req('POST', '/api/auth/login', { email: email, password: password, totpCode: code.trim() });
         } else { throw e; }

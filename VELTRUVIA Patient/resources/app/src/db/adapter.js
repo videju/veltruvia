@@ -13,9 +13,47 @@
 // All methods return promises so the same route code works against both the
 // in-process SQLite files and the remote Turso HTTP API.
 
-import { readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, openSync, closeSync, writeSync, unlinkSync } from 'node:fs';
 
 let impl = null;
+
+// ── Advisory single-writer lock ────────────────────────────────────
+// The sql.js backend keeps the whole database in RAM and snapshots it to
+// disk every few seconds — two processes doing that to the same file
+// silently clobber each other (Server exe vs Doctor exe). A lock file
+// created with O_EXCL (atomic) lets exactly one process claim read-write
+// access; everyone else opens READ-ONLY and follows disk changes.
+function tryAcquireWriterLock(dbPath) {
+  const lockPath = dbPath + '.lock';
+  const claim = () => {
+    const fd = openSync(lockPath, 'wx');       // atomic create-if-not-exists
+    writeSync(fd, String(process.pid));
+    closeSync(fd);
+  };
+  try {
+    claim();
+    return true;                               // we are the writer
+  } catch (err) {
+    if (err.code !== 'EEXIST') return true;    // can't enforce here → fail open
+    try {
+      const pid = parseInt(readFileSync(lockPath, 'utf-8').trim(), 10);
+      if (pid === process.pid) return true;    // our own leftover lock
+      if (pid) {
+        try { process.kill(pid, 0); return false; }  // holder alive → read-only
+        catch { /* ESRCH: dead holder, reclaim below */ }
+      }
+      unlinkSync(lockPath);                    // stale lock from a crashed process
+      claim();
+      return true;
+    } catch {
+      return false;                            // lost a reclaim race → read-only
+    }
+  }
+}
+
+function releaseWriterLock(dbPath) {
+  try { unlinkSync(dbPath + '.lock'); } catch {}
+}
 
 export async function openDatabase(path) {
   const tursoUrl = process.env.TURSO_DATABASE_URL || process.env.LIBSQL_URL;
@@ -52,6 +90,9 @@ export async function openDatabase(path) {
       const SQL = await initSqlJs();
       const fs = await import('node:fs');
       let db;
+      // Single-writer enforcement BEFORE loading: without this, a second
+      // VELTRUVIA process would snapshot over the first one's writes.
+      const canWrite = tryAcquireWriterLock(path);
       if (path === ':memory:') {
         db = new SQL.Database();
       } else {
@@ -62,8 +103,12 @@ export async function openDatabase(path) {
           db = new SQL.Database();
         }
       }
-      impl = 'sql.js';
-      return wrapSqlJs(SQL, db, path);
+      if (!canWrite) {
+        console.warn(`[db] ${path} is owned by another VELTRUVIA process (pid in ${path}.lock) — opening READ-ONLY.`);
+        console.warn('[db] Start the central Server first, or close this app: it will display data but not save changes.');
+      }
+      impl = canWrite ? 'sql.js' : 'sql.js (read-only)';
+      return wrapSqlJs(SQL, db, path, canWrite);
     }
   }
 }
@@ -91,13 +136,14 @@ function wrapSync(db, pragma, dbPath) {
   };
 }
 
-function wrapSqlJs(SQL, initialDb, dbPath) {
+function wrapSqlJs(SQL, initialDb, dbPath, readOnly = false) {
   // Use a reference object so we can swap the db pointer on reload
   const ref = { db: initialDb };
   let lastMtime = 0;
   try { lastMtime = statSync(dbPath).mtimeMs; } catch {}
 
   const save = () => {
+    if (readOnly) return;                      // readers never write the file
     try {
       const data = ref.db.export();
       writeFileSync(dbPath, Buffer.from(data));
@@ -119,9 +165,10 @@ function wrapSqlJs(SQL, initialDb, dbPath) {
     } catch {}
   };
 
-  const intervalId = setInterval(save, 5000);
-  // Check for external writes every 2 seconds
-  const reloadId = setInterval(reloadIfChanged, 2000);
+  // Writers snapshot the full DB to disk every 5 s and also follow external
+  // reloads; READ-ONLY instances only follow the file the writer publishes.
+  const intervalId = readOnly ? setInterval(reloadIfChanged, 5000) : setInterval(save, 5000);
+  const reloadId = readOnly ? null : setInterval(reloadIfChanged, 2000);
 
   process.on('exit', save);
   process.on('SIGINT', () => { save(); process.exit(); });
@@ -183,8 +230,9 @@ function wrapSqlJs(SQL, initialDb, dbPath) {
     },
     close() {
       clearInterval(intervalId);
-      clearInterval(reloadId);
+      if (reloadId) clearInterval(reloadId);
       save();
+      if (!readOnly) releaseWriterLock(dbPath);
       ref.db.close();
     },
     flush() { save(); },

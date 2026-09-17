@@ -2,6 +2,8 @@
 // routes/sync.js — they authenticate against the synced records.
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { db, writeAudit } from '../db/index.js';
 import {
@@ -161,11 +163,14 @@ authRouter.post('/login', validate(loginSchema), asyncHandler(async (req, res) =
   }
 
   await db.prepare('UPDATE users SET last_login = ? WHERE id = ?').run(new Date().toISOString(), user.id);
-  await createSession(res, { subjectId: user.id, subjectType: 'user', role: user.role });
+  const session = await createSession(res, { subjectId: user.id, subjectType: 'user', role: user.role });
   await writeAudit({ actorId: user.id, actorRole: user.role, action: 'user.login', targetId: user.id, ip: req.ip });
 
   res.json({
     ok: true,
+    // Bearer token ONLY for native clients (mobile APKs) that don't persist
+    // cookies — keeps browser responses free of exfiltratable credentials.
+    ...(req.headers['x-veltruvia-native'] === '1' ? { token: session.token } : {}),
     user: {
       id: user.id, email: user.email, role: user.role,
       name: decryptPHI(user.name_enc),
@@ -274,3 +279,75 @@ authRouter.get('/search-patients', authenticate, requireRole('doctor', 'admin'),
     res.json({ ok: true, patients: patients.slice(0, 20) });
   })
 );
+
+// ── Self-service doctor password recovery ─────────────────────────
+// Single-use, 15-minute reset token emailed to the account's address.
+// Uniform response — never reveals whether an email is registered.
+const recoveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many recovery attempts. Try again in 15 minutes.' },
+});
+const doctorRecoverySchema = z.object({
+  email: z.string().email().toLowerCase(),
+  newPassword: z.string().min(10).max(200)
+    .refine(p => /[A-Za-z]/.test(p) && /\d/.test(p),
+      { message: 'Password must be at least 10 characters and include a letter and a number' })
+    .optional(),
+  token: z.string().min(10).max(200).optional(),
+});
+
+authRouter.post('/forgot-password', recoveryLimiter, validate(doctorRecoverySchema), asyncHandler(async (req, res) => {
+  const { email } = req.valid;
+  const { mailConfigured, sendMail } = await import('../mail.js');
+  const user = await db.prepare('SELECT id FROM users WHERE email = ? AND active = 1').get(email);
+  if (user && mailConfigured()) {
+    const token = randomToken(24);
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expires = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    await db.prepare(`
+      INSERT INTO password_resets (email, token_hash, expires_at, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(email) DO UPDATE SET token_hash = excluded.token_hash, expires_at = excluded.expires_at, created_at = excluded.created_at
+    `).run(email, tokenHash, expires, new Date().toISOString());
+    try {
+      await sendMail({
+        to: email,
+        subject: 'VELTRUVIA — password reset code',
+        text: `Your VELTRUVIA password reset code is:\n\n${token}\n\nIt expires in 15 minutes. If you did not request this, ignore this email.`,
+      });
+    } catch { /* uniform response regardless */ }
+  }
+  res.json({
+    ok: true,
+    message: mailConfigured()
+      ? 'If the account exists, a reset code has been sent.'
+      : 'Email is not configured on this server — ask your administrator to reset your password.',
+  });
+}));
+
+authRouter.post('/reset-password', recoveryLimiter, validate(doctorRecoverySchema), asyncHandler(async (req, res) => {
+  const { email, newPassword, token } = req.valid;
+  if (!token) return res.status(400).json({ error: 'Reset code is required.' });
+  if (!newPassword) return res.status(400).json({ error: 'New password is required.' });
+  const row = await db.prepare('SELECT * FROM password_resets WHERE email = ?').get(email);
+  const fail = () => res.status(400).json({ error: 'Invalid or expired reset code.' });
+  if (!row) return fail();
+  if (new Date(row.expires_at).getTime() < Date.now()) {
+    await db.prepare('DELETE FROM password_resets WHERE email = ?').run(email);
+    return fail();
+  }
+  const hash = createHash('sha256').update(token).digest('hex');
+  if (hash !== row.token_hash) return fail();
+
+  const user = await db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(email);
+  if (!user) return fail();
+  await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), user.id);
+  await db.prepare('DELETE FROM password_resets WHERE email = ?').run(email);
+  await db.prepare('UPDATE sessions SET revoked = 1 WHERE subject_id = ? AND revoked = 0').run(user.id);
+  await clearLoginAttempts('auth:' + email);
+  await writeAudit({ actorId: user.id, actorRole: 'doctor', action: 'doctor.self_password_reset', targetId: user.id, ip: req.ip });
+  res.json({ ok: true, message: 'Password updated. Sign in with your new password.' });
+}));

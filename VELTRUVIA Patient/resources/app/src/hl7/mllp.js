@@ -23,6 +23,14 @@ const MLLP_CR = 0x0D;    // CR  — Carriage Return
  * @returns {net.Server}
  */
 export function startMllpServer(port = parseInt(process.env.MLLP_PORT || '2575', 10)) {
+  // SECURITY: HL7/MLLP has NO authentication — anyone who can reach the port
+  // can inject fake lab results. So the listener is OFF unless explicitly
+  // enabled (MLLP_ENABLED=true) and binds to loopback unless the operator
+  // opts in (MLLP_HOST=0.0.0.0, e.g. for a real analyzer on the LAN).
+  if (process.env.MLLP_ENABLED !== 'true') {
+    console.log('[mllp] Listener disabled (set MLLP_ENABLED=true to accept lab instruments)');
+    return null;
+  }
   if (mllpServer) {
     console.log('[mllp] Server already running');
     return mllpServer;
@@ -76,9 +84,10 @@ export function startMllpServer(port = parseInt(process.env.MLLP_PORT || '2575',
     });
   });
 
-  mllpServer.listen(port, () => {
-    console.log(`[mllp] MLLP/TCP server listening on port ${port}`);
-    console.log(`[mllp] Instruments can connect via TCP to ${port}`);
+  const host = process.env.MLLP_HOST || '127.0.0.1';
+  mllpServer.listen(port, host, () => {
+    console.log(`[mllp] MLLP/TCP server listening on ${host}:${port}`);
+    console.log(`[mllp] Instruments can connect via TCP to ${host === '127.0.0.1' ? 'localhost' : host}:${port}`);
   });
 
   mllpServer.on('error', (err) => {

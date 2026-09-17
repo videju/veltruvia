@@ -106,6 +106,33 @@ for (const app of APPS) {
   else fail(`${app}: contains nested copy of itself — delete resources/app/${junk[0]}/`);
 }
 
+// ── 3c. Public page scripts parse (inline <script> blocks + js/*.js) ──
+console.log('\n🔍 Page scripts (public/ inline blocks + js/ modules parse)');
+for (const app of APPS) {
+  const pubDir = `${app}/resources/app/public`;
+  let blocks = 0, bad = 0;
+  const parse = (code, label) => {
+    blocks++;
+    try { new vm.SourceTextModule(code); }
+    catch (err) { bad++; fail(`${app}: ${label} → ${err.message.split('\n')[0]}`); }
+  };
+  let entries = [];
+  try { entries = readdirSync(pubDir); } catch {}
+  for (const e of entries) {
+    if (e.endsWith('.html')) {
+      const html = readFileSync(`${pubDir}/${e}`, 'utf8');
+      const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
+      let m, n = 0;
+      while ((m = re.exec(html))) parse(m[1], `${e} block #${++n}`);
+    } else if (e.endsWith('.js')) {
+      parse(readFileSync(`${pubDir}/${e}`, 'utf8'), e);
+    }
+  }
+  const jsDir = `${pubDir}/js`;
+  try { for (const e of readdirSync(jsDir)) if (e.endsWith('.js')) parse(readFileSync(`${jsDir}/${e}`, 'utf8'), `js/${e}`); } catch {}
+  if (bad === 0) ok(`${app}: ${blocks} page script block(s) parse cleanly`);
+}
+
 // ── 4. Icon sanity ───────────────────────────────────────────────
 console.log('\n🔍 Icons (dimensions match filename, maskable variants present)');
 for (const app of APPS) {
