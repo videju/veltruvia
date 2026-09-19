@@ -84,6 +84,17 @@ function serveStatic(req, res) {
     else { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'API loading' })); }
     return;
   }
+  // Security headers for everything this raw server serves itself (the
+  // Express app applies Helmet to /api and its own static fallback, but
+  // direct file responses here previously went out with no headers).
+  const SEC = {
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://api.qrserver.com; connect-src 'self' https://api.emailjs.com https://api.qrserver.com https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'",
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Origin-Agent-Cluster': '?1',
+  };
   if (pathname === '/') pathname = '/index.html';
   const filePath = join(PUBLIC, pathname);
   const rel = relative(PUBLIC, filePath);
@@ -91,12 +102,12 @@ function serveStatic(req, res) {
   if (!existsSync(filePath) || !statSync(filePath).isFile()) {
     if (expressApp) { expressApp(req, res); return; }
     const fallback = join(PUBLIC, 'index.html');
-    if (existsSync(fallback)) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); createReadStream(fallback).pipe(res); }
-    else { res.writeHead(404); res.end('Not Found'); }
+    if (existsSync(fallback)) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', ...SEC }); createReadStream(fallback).pipe(res); }
+    else { res.writeHead(404, SEC); res.end('Not Found'); }
     return;
   }
   const ext = extname(pathname).toLowerCase();
-  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', ...SEC });
   createReadStream(filePath).pipe(res);
 }
 

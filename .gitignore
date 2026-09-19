@@ -116,3 +116,6 @@ hardening-tmp/
 # Windows code-signing secrets (self-signed placeholder cert)
 veltruvia-codesign.pfx
 .codesign-pfx-pass
+
+# Offline download mirror is machine-local (binaries live in dist/)
+"VELTRUVIA Server/resources/app/public/downloads/"
