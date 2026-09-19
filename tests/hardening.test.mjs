@@ -199,3 +199,69 @@ test('push VAPID public key endpoint is available (push wired up)', async () => 
   const d = await r.json();
   assert.ok(d.key && d.key.length > 40, 'auto-generated VAPID public key present');
 });
+
+// ── Corruption recovery (observed twice in production 2026-09-18/19) ──
+// Scenario: a process killed mid-snapshot leaves a zeroed/truncated DB file.
+// The NEXT boot must quarantine it and restore the newest valid backup.
+// Verified unit-style (no second server needed): the repair runs during
+// openDatabase, before any backend touches the file.
+test('corrupt DB at boot is quarantined and restored from the newest backup', { timeout: 30000 }, async () => {
+  const { repairCorruptDb, looksLikeSqliteFile } = await import(pathToFileURL(join(APP, 'src', 'db', 'repair.js')).href);
+
+  // Build the newest backup as a MINIMAL VALID SQLite file (schema.sql and
+  // migrations.sql are idempotent, so a marker-table-only database boots).
+  const { createRequire } = await import('node:module');
+  const require2 = createRequire(import.meta.url);
+  const initSqlJs = require2(join(APP, 'node_modules', 'sql.js'));
+  const SQL = await initSqlJs();
+  const good = new SQL.Database();
+  good.exec('CREATE TABLE recovery_marker (id INTEGER PRIMARY KEY, note TEXT); INSERT INTO recovery_marker (note) VALUES (\'pre-corruption\');');
+  const goodBuf = Buffer.from(good.export());
+  good.close();
+
+  const backupsDir = join(dataDir, 'backups');
+  mkdirSync(backupsDir, { recursive: true });
+  writeFileSync(join(backupsDir, 'veltruvia-2099-01-01T00-00-00.db'), goodBuf); // sorts NEWEST
+  writeFileSync(join(backupsDir, 'veltruvia-2000-01-01T00-00-00.db'), Buffer.alloc(0)); // corrupt — must be skipped
+
+  // The live DB is zeroed end-to-end, as a torn write leaves it.
+  writeFileSync(dbPath, Buffer.alloc(goodBuf.length));
+  assert.equal(looksLikeSqliteFile(dbPath), false, 'zeroed file must fail the header check');
+
+  const restored = repairCorruptDb(dbPath, dataDir);
+  assert.ok(restored, 'repair must report a successful restore');
+  assert.ok(looksLikeSqliteFile(dbPath), 'restored file carries the SQLite header');
+
+  // Quarantine kept (never deleted), restore picked the NEWEST VALID backup.
+  const quarantined = readdirSync(dataDir).filter(f => f.startsWith('test.db.corrupt-'));
+  assert.equal(quarantined.length, 1, 'corrupt file quarantined exactly once');
+  const adopted = new SQL.Database(readFileSync(dbPath));
+  const marker = adopted.exec('SELECT note FROM recovery_marker');
+  assert.ok(marker.length && marker[0].values[0][0] === 'pre-corruption', 'restored DB contains the marker table (newest backup won)');
+  adopted.close();
+
+  // Idempotent on a healthy file — no double quarantine.
+  assert.equal(repairCorruptDb(dbPath, dataDir), false);
+  assert.equal(readdirSync(dataDir).filter(f => f.startsWith('test.db.corrupt-')).length, 1);
+
+  // Cleanup so later tests / reruns start clean.
+  rmSync(join(backupsDir, 'veltruvia-2099-01-01T00-00-00.db'), { force: true });
+  rmSync(join(backupsDir, 'veltruvia-2000-01-01T00-00-00.db'), { force: true });
+  rmSync(quarantined.map(f => join(dataDir, f))[0], { force: true });
+});
+
+test('sql.js snapshot write is atomic (temp file, never in-place)', { timeout: 30000 }, async () => {
+  // Read-only opener from the earlier lock test proved snapshot() runs and
+  // publishes to disk; here we assert the on-disk file is ALWAYS valid across
+  // many save cycles, i.e. the rename-over never exposes a torn write.
+  for (let i = 0; i < 6; i++) {
+    await new Promise(r => setTimeout(r, 1000)); // spans several 5s save ticks
+    let buf;
+    try { buf = readFileSync(dbPath); } catch { continue; } // vanished mid-rename is fine (atomic)
+    if (!buf.length) continue;                              // not yet published
+    assert.ok(
+      buf.subarray(0, 16).equals(Buffer.from('SQLite format 3\x00', 'latin1')),
+      `snapshot ${i}: on-disk DB must always carry the SQLite header (torn write would zero it)`,
+    );
+  }
+});

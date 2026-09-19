@@ -23,8 +23,16 @@
   var URL_KEY = 'veltruvia_server_url';
   var TOKEN_KEY = 'veltruvia_auth_token';
 
+  // Baked at APK build time via <meta name="veltruvia-api-base"> in the
+  // entry HTML (CSP-safe — no inline script). Empty in the web/desktop UI.
+  var META_BASE = '';
+  try {
+    var m = document.querySelector('meta[name="veltruvia-api-base"]');
+    if (m) META_BASE = String(m.getAttribute('content') || '').trim();
+  } catch (e) {}
+
   var state = {
-    base: (window.__VELTRUVIA_API_BASE__ || ''),   // baked at build, overridable in Settings
+    base: META_BASE,                               // baked at build, overridable in Settings
     token: null,
   };
 
@@ -125,9 +133,8 @@
   // ── Settings screen (native builds only) ─────────────────────────
   if (IS_NATIVE) {
     function showSettings() {
-      var current = state.base || 'http://10.0.2.2:3000';
       var next = normalizeBase(window.prompt(
-        'VELTRUVIA Server address\n(e.g. https://emr.yourclinic.com)', current));
+        'VELTRUVIA Server address\n(e.g. https://emr.yourclinic.com)', state.base || ''));
       if (next === null) return;
       if (next !== state.base) {
         state.base = next;

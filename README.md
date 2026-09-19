@@ -15,6 +15,7 @@ Four self-contained desktop apps sharing one encrypted backend:
 npm run check      # fast quality gate: syntax, await-audit, bundle drift, icons
 npm run verify     # full 53-check feature verification × 4 apps (~2 min)
 npm run sync-bundles   # propagate edits from the Server bundle to the 3 clients
+node scripts/feature-sweep.mjs   # live-surface probe: every GET × every role (needs a running server)
 ```
 
 **The `VELTRUVIA Server` bundle is the canonical source.** Edit code there, then run
@@ -53,8 +54,23 @@ All secrets come from the shared `.env` at the install root (never committed):
 `.github/workflows/ci.yml` runs the API test suite on Node 20/22 and validates the
 app imports. Run `npm run precommit` locally before committing.
 
+## Resilience
+
+The database is protected against the corruption class observed in the wild
+(a process killed mid-snapshot used to zero the file):
+
+- **Atomic snapshots** — the sql.js writer exports → validates → writes a
+  temp file → renames it over the DB. The on-disk file is always a complete
+  database, never a torn write.
+- **Boot-time integrity check** — if the DB file lacks the SQLite header at
+  startup, it is quarantined (`*.corrupt-<timestamp>`, never deleted) and the
+  newest valid backup from `data/backups/` is restored automatically.
+- **Boot restore point** — every healthy boot snapshots the DB to
+  `data/backups/` (newest 14 kept) so a fresh backup always exists.
+- **Boot watchdog** — the Server exe retries a failed API load and, if a
+  corrupt database was the cause, self-heals before surfacing a visible error.
+
 ## Known limitations
 
 - Exes are not code-signed; Windows SmartScreen will warn on first launch
 - HL7 MLLP TCP listener binds broadly when enabled — restrict with a firewall in production
-- The inline-`onclick` CSP exception in `app.js` is flagged with a TODO; UI refactor pending

@@ -1,6 +1,6 @@
 // Single shared SQLite connection via the adapter (better-sqlite3 or node:sqlite).
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pbkdf2Sync, randomBytes } from 'node:crypto';
@@ -39,6 +39,23 @@ export async function initSchema() {
     console.warn('[db] migrations:', e.message);
   }
   console.log('[db] schema ready');
+
+  // Boot-time restore point: snapshot the healthy DB so a later corruption
+  // always has a recent backup for repairCorruptDb (src/db/adapter.js) to
+  // restore from. Keeps the newest 14 backup files — auto-start on every
+  // Windows boot would otherwise grow the directory unboundedly.
+  try {
+    flushDb();                                  // sql.js: write RAM → disk now
+    const bdir = join(dirname(config.dbPath), 'backups');
+    mkdirSync(bdir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    copyFileSync(config.dbPath, join(bdir, `veltruvia-boot-${stamp}.db`));
+    const all = readdirSync(bdir).filter(f => f.endsWith('.db')).sort();
+    for (const stale of all.slice(0, Math.max(0, all.length - 14))) {
+      try { unlinkSync(join(bdir, stale)); } catch {}
+    }
+    console.log('[db] boot snapshot written to backups/');
+  } catch { /* best-effort — never block boot */ }
 }
 
 // ── Demo account seeding ──────────────────────────────────────────

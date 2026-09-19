@@ -6,7 +6,15 @@ import { join, resolve } from 'node:path';
 
 const appDir = process.argv[2];
 const appName = process.argv[3] || appDir;
-const port = 3000;
+// Pick a random free port: never test against (or fight with) a server that's
+// already running — on Windows SO_REUSEADDR lets a probe "succeed" on an
+// actively-listening port, which made checks silently hit the live instance.
+import net from 'node:net';
+const port = await new Promise((resolve, reject) => {
+  const probe = net.createServer();
+  probe.once('error', () => reject(new Error('no free port available')));
+  probe.listen(0, '127.0.0.1', () => { const p = probe.address().port; probe.close(() => resolve(p)); });
+});
 const base = `http://localhost:${port}`;
 const dbPath = join(appDir, 'test-verify.db');const runtimeFiles = ['.demo-admin-password', 'patient-store.json', 'appointments-store.json',
   'availability-store.json', 'logs-store.json', 'messages-store.json',
@@ -30,14 +38,6 @@ let out = '';
 server.stdout.on('data', d => { out += d; });
 server.stderr.on('data', d => { out += d; });
 server.on('error', e => { console.error('spawn error:', e.message); process.exit(1); });
-
-// Fail fast if something else already owns the port (stale server = testing the wrong code)
-import net from 'node:net';
-await new Promise((resolve, reject) => {
-  const probe = net.createServer();
-  probe.once('error', () => reject(new Error('Port 3000 already in use — kill the stale process first (netstat -ano | findstr :3000)')));
-  probe.listen(port, '127.0.0.1', () => probe.close(() => resolve()));
-});
 
 async function waitReady() {
   for (let i = 0; i < 60; i++) {

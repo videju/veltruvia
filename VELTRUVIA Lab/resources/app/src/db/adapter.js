@@ -14,6 +14,7 @@
 // in-process SQLite files and the remote Turso HTTP API.
 
 import { readFileSync, writeFileSync, statSync, openSync, closeSync, writeSync, unlinkSync, renameSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
 let impl = null;
@@ -27,6 +28,9 @@ let impl = null;
 // acquire uses a UNIQUE temp file + rename (atomic takeover, no
 // unlink-then-create race), and the content `<pid> <bootId>` defeats pid reuse.
 const bootId = randomBytes(8).toString('hex');
+
+// Corrupt-file boot guard: quarantine + backup-restore (see repair.js).
+import { repairCorruptDb } from './repair.js';
 
 function tryAcquireWriterLock(dbPath) {
   const lockPath = dbPath + '.lock';
@@ -88,6 +92,15 @@ function stillOwnsWriterLock(dbPath) {
   } catch { return false; }
 }
 
+// ── Corrupt-file boot guard ───────────────────────────────────────
+// SQLite files start with the 16-byte magic "SQLite format 3\0". A file
+// missing it cannot be a database (zeroed by a torn write, truncated,
+// wrong file) — and opening it either crashes boot (sql.js: "file is not
+// a database") or silently starts EMPTY (better-sqlite3). Observed twice
+// in production (2026-09-18/19). Before any backend touches the file:
+// quarantine the corrupt file beside the DB, then restore the newest
+// valid backup from <dbDir>/backups (the automated-backup layout).
+
 export async function openDatabase(path) {
   const tursoUrl = process.env.TURSO_DATABASE_URL || process.env.LIBSQL_URL;
   if (tursoUrl) {
@@ -103,6 +116,9 @@ export async function openDatabase(path) {
   if (process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME) {
     console.warn('[db] No TURSO_DATABASE_URL set on serverless host — using in-memory database (data will not persist)');
   }
+
+  // Boot guard: never let a corrupt file crash boot or start silently empty.
+  repairCorruptDb(path);
 
   // Try better-sqlite3 first.
   try {
@@ -183,11 +199,32 @@ function wrapSqlJs(SQL, initialDb, dbPath, readOnly = false) {
       console.warn('[db] writer lock lost — flushing disabled to avoid clobbering the new owner');
       return;                                  //  presumed dead): stop writing
     }
+    // ATOMIC snapshot: export → validate → write temp → rename over the DB.
+    // A plain writeFileSync(dbPath, …) truncated mid-write (process killed,
+    // power loss) leaves a ZEROED file behind — observed twice in production
+    // (2026-09-18/19) as "file is not a database" on next boot. rename() on
+    // the same volume is atomic, so the on-disk file is always either the
+    // previous complete snapshot or the new one — never a torn write.
+    let tmpPath = '';
     try {
-      const data = ref.db.export();
-      writeFileSync(dbPath, Buffer.from(data));
+      const data = Buffer.from(ref.db.export());
+      // Validate the export re-opens as SQLite before it is allowed to
+      // replace the last good snapshot. Cheap (header + master-table probe).
+      const probe = new SQL.Database(data);
+      const check = probe.exec("SELECT count(*) FROM sqlite_master");
+      probe.close();
+      if (!check.length) throw new Error('export failed sqlite_master probe');
+      tmpPath = `${dbPath}.save-${process.pid}-${bootId}.tmp`;
+      writeFileSync(tmpPath, data);
+      // Windows: rename onto a file another process holds open throws —
+      // caught below, the last good snapshot stays in place. POSIX: atomic.
+      renameSync(tmpPath, dbPath);
+      tmpPath = '';
       lastMtime = Date.now();
-    } catch (e) { console.error('[db] snapshot failed:', e && e.message); }
+    } catch (e) {
+      console.error('[db] snapshot failed (on-disk DB untouched):', e && e.message);
+      if (tmpPath) { try { unlinkSync(tmpPath); } catch {} }
+    }
   };
 
   // Reload from disk if another process wrote to it. Poison guard: never
@@ -198,6 +235,13 @@ function wrapSqlJs(SQL, initialDb, dbPath, readOnly = false) {
       const st = statSync(dbPath);
       if (st.mtimeMs > lastMtime + 100) {
         const buf = readFileSync(dbPath);
+        // Torn-write guard: a zeroed/truncated file can never be adopted.
+        // SQLite files start with the 16-byte magic "SQLite format 3\0".
+        if (buf.length < 100 || !buf.subarray(0, 16).equals(Buffer.from('SQLite format 3\x00', 'latin1'))) {
+          console.warn('[db] on-disk database is corrupt (bad header) — keeping in-memory state (no reload)');
+          lastMtime = st.mtimeMs;      // don't re-log every tick
+          return;
+        }
         const newDb = new SQL.Database(buf);
         const probe = newDb.exec("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('kv_store','users') LIMIT 2");
         if (!probe.length || probe[0].values.length < 2) {

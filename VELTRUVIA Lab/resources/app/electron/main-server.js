@@ -258,10 +258,30 @@ app.whenReady().then(async () => {
 
     buildTray();
 
-    // Load Express in background
-    tryLoadExpress(serverPort).then(ok => {
+    // Load Express in background with a watchdog: a silent import failure
+    // (observed in the packaged exe) used to leave the API stuck at
+    // "API loading" forever. Retry twice, then self-heal the known cause
+    // (corrupt DB at boot: quarantine it and restore from backups/).
+    const loadWithWatchdog = async (attempt = 1) => {
+      const ok = await tryLoadExpress(serverPort);
       expressOk = ok;
       rebuildTrayMenu();
+      if (ok) return true;
+      if (attempt < 3) {
+        console.error(`[server] Express load attempt ${attempt} failed — retrying in 3 s`);
+        await new Promise(r => setTimeout(r, 3000));
+        return loadWithWatchdog(attempt + 1);
+      }
+      try {
+        const dataDir = dirname(process.env.DB_PATH || '');
+        const { repairCorruptDb } = await import(pathToFileURL(join(ROOT, 'src', 'db', 'repair.js')).href);
+        repairCorruptDb(process.env.DB_PATH, dataDir);
+      } catch (e) { console.error('[server] corrupt-DB self-heal failed:', e.message); }
+      console.error('[server] Express load failed after retries and self-heal — run Launch Server.bat again');
+      try { dialog.showErrorBox('VELTRUVIA Server', 'The API failed to load after several attempts.\n\nA corrupt database was detected and restored from the newest backup if one existed.\nStart the server again — if this keeps happening, see data/error-log.jsonl.'); } catch {}
+      return false;
+    };
+    loadWithWatchdog().then(ok => {
       if (ok) {
         // Attach the telehealth WebSocket signaling to the same HTTP server.
         // (src/server.js does this for node boots; without it here the exe's
