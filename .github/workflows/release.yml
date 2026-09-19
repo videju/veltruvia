@@ -23,21 +23,38 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Install dependencies
         run: npm ci
         working-directory: VELTRUVIA Server/resources/app
+      - name: Decode code-signing certificate
+        shell: pwsh
+        env:
+          CSC_LINK_B64: ${{ secrets.CSC_LINK }}
+        run: |
+          if ($env:CSC_LINK_B64) {
+            # Keep the PFX outside the repo/packaged tree — never ship it.
+            $pfx = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CSC_LINK_B64))
+            Add-Content $env:GITHUB_ENV "CSC_LINK=$pfx"
+          } else {
+            echo "No CSC_LINK secret — installers will be unsigned"
+          }
       - name: Build Server (installer + portable zip)
         shell: pwsh
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
-          npx electron-builder --config electron/electron-builder-server.json
+          npx electron-builder --config electron/electron-builder-server.json --publish never
           # Stash the Server updater feed immediately: the Doctor build below
           # writes its own latest.yml into the same folder and would overwrite it.
           Move-Item dist-desktop/latest.yml dist-desktop/latest-server.yml -Force
         working-directory: VELTRUVIA Server/resources/app
       - name: Build Doctor (installer + portable zip)
-        run: npx electron-builder --config electron/electron-builder-doctor.json
+        run: npx electron-builder --config electron/electron-builder-doctor.json --publish never
         working-directory: VELTRUVIA Server/resources/app
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       - name: Stage desktop assets
         shell: pwsh
         run: |
@@ -80,10 +97,11 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: android-actions/setup-android@v3
+      # No android-actions/setup-android needed: GitHub's ubuntu-latest image
+      # ships the Android SDK (the v3 action crashed on current runners).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
       - name: Restore keystore
         shell: bash
         env:
@@ -97,6 +115,13 @@ jobs:
       - name: Build release APKs
         shell: bash
         run: |
+          # android/ is a generated project (gitignored) — create it on CI.
+          for app in patient lab; do
+            pushd "mobile/$app" >/dev/null
+            npm ci --no-audit --no-fund
+            [ -d android ] || npx cap add android
+            popd >/dev/null
+          done
           npm run apk:patient -- --release
           npm run apk:lab -- --release
         env:

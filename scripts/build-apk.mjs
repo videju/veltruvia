@@ -118,6 +118,20 @@ if (cap.status !== 0) {
   process.exit(cap.status ?? 1);
 }
 
+// Stamp the app version from package.json into the generated gradle config:
+// a fresh `cap add android` ships versionCode 1, which would be a *downgrade*
+// for phones already running an earlier release.
+const pkg = JSON.parse(readFileSync(join(mobileDir, 'package.json'), 'utf8'));
+const [vMaj, vMin, vPatch] = String(pkg.version).split('.').map(Number);
+const versionCode = vMaj * 10000 + vMin * 100 + (vPatch || 0); // 2.0.1 → 20001
+const gradleFile = join(androidDir, 'app', 'build.gradle');
+let gradleSrc = readFileSync(gradleFile, 'utf8');
+gradleSrc = gradleSrc
+  .replace(/versionCode \d+/, `versionCode ${versionCode}`)
+  .replace(/versionName "[^"]*"/, `versionName "${pkg.version}"`);
+writeFileSync(gradleFile, gradleSrc);
+console.log(`   ✅ stamped version ${pkg.version} (versionCode ${versionCode})`);
+
 const gradle = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
 const task = release ? 'assembleRelease' : 'assembleDebug';
 console.log(`   ⟳ gradle ${task}…`);
