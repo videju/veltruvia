@@ -7,19 +7,26 @@
 // used by the 2FA setup page) renders the QR images — no extra dependency.
 // ═════════════════════════════════════════════════════════════════════
 (function () {
-  'use strict';
-
-  const GH = 'https://github.com/videju/veltruvia';
-
-  // ── Version badge (shown after fetch; hidden on any failure) ──────
-  fetch(GH + '/releases/latest', { method: 'HEAD' })
-    .then(r => {
-      const tag = (r.url.match(/tag\/([^/?#]+)/) || [])[1];
-      if (!tag) return;
-      const el = document.getElementById('ver-badge');
-      if (el) { el.textContent = 'Latest release: ' + decodeURIComponent(tag); el.hidden = false; }
-    })
-    .catch(() => { /* offline or no releases yet — badge stays hidden */ });
+  'use strict';  // ── Version badge ────────────────────────────────────────────────
+  // Two lines: the RUNNING server's version (/health, same-origin, CSP-safe),
+  // and — only if a GitHub Release exists — the latest published one.
+  (async () => {
+    const el = document.getElementById('ver-badge');
+    if (!el) return;
+    let text = '';
+    try {
+      const h = await fetch('/health').then(r => r.json());
+      if (h.version) text = 'This server: v' + h.version;
+    } catch (e) { /* not served by VELTRUVIA Server — skip local line */ }
+    try {
+      const r = await fetch('https://api.github.com/repos/videju/veltruvia/releases/latest', { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.tag_name) text = 'Latest release: ' + j.tag_name;
+      }
+    } catch (e) { /* offline / no release yet — server version stays */ }
+    if (text) { el.textContent = text; el.hidden = false; }
+  })();
 
   // ── QR codes for the APK cards ────────────────────────────────────
   document.querySelectorAll('[data-qr]').forEach(btn => {
@@ -67,7 +74,7 @@
   }
 
   // ── Checksums table from SHA256SUMS.txt ───────────────────────────
-  fetch('/SHA256SUMS.txt')
+  fetch('/downloads/SHA256SUMS.txt')
     .then(r => (r.ok ? r.text() : Promise.reject(r.status)))
     .then(text => {
       const rows = document.getElementById('sha-rows');

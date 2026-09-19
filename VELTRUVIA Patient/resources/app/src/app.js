@@ -9,9 +9,13 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { config } from './config.js';
+
+// Server version, reported by /health (download page badge shows it).
+const APP_VERSION = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version;
 
 import { initSchema, initTestData } from './db/index.js';
 import { errorHandler } from './middleware/validate.js';
@@ -73,11 +77,14 @@ app.use(helmet({
       // Fonts are self-hosted under /fonts/ (no third-party CDN dependency).
       styleSrc: ["'self'", "'unsafe-inline'"],
       fontSrc: ["'self'"],
-      imgSrc: ["'self'", 'data:', 'blob:'],
+      // api.qrserver.com: renders the 2FA otpauth QR code and the
+      // download-page APK QR codes (as <img>, hence imgSrc too).
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://api.qrserver.com'],
       // api.emailjs.com: the EmailJS fallback sender XHRs there — without
       // this entry the browser silently blocks every EmailJS send.
       // api.qrserver.com: renders the 2FA otpauth QR code.
-      connectSrc: ["'self'", 'https://api.emailjs.com', 'https://api.qrserver.com'],
+      // api.github.com: the download page's "latest release" badge.
+      connectSrc: ["'self'", 'https://api.emailjs.com', 'https://api.qrserver.com', 'https://api.github.com'],
       manifestSrc: ["'self'"],
       workerSrc: ["'self'"],
     },
@@ -176,7 +183,7 @@ const storeLimiter = rateLimit({ windowMs: 60 * 1000, max: 60 }); // Stricter fo
 // Shallow by default (fast, for load-balancer pings); ?deep=1 also checks
 // the database so a broken DB surfaces as unhealthy instead of silently 200.
 app.get('/health', async (req, res) => {
-  const health = { ok: true, ts: new Date().toISOString() };
+  const health = { ok: true, ts: new Date().toISOString(), version: APP_VERSION };
   
   if (req.query.deep === '1') {
     // Check database
