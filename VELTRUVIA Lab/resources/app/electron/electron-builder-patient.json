@@ -7,6 +7,7 @@
   "files": [
     "src/**/*",
     "public/**/*",
+    "!public/downloads/**/*",
     "electron/**/*",
     "package.json",
     "node_modules/**/*",
@@ -36,6 +37,12 @@
         "arch": [
           "x64"
         ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "x64"
+        ]
       }
     ],
     "icon": "public/icons/patient-512.png"
@@ -59,5 +66,10 @@
   "electronLanguages": [
     "en-US"
   ],
-  "electronVersion": "33.0.0"
+  "electronVersion": "33.0.0",
+  "publish": {
+    "provider": "github",
+    "owner": "videju",
+    "repo": "veltruvia"
+  }
 }

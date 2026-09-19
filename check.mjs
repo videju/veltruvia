@@ -77,6 +77,9 @@ import { createHash } from 'node:crypto';
 function hashTree(dir) {
   const h = createHash('sha256');
   const walk = d => {
+    // public/downloads is a machine-local offline mirror of release binaries
+    // (never synced to clients, never packaged) — it must not count as drift.
+    if (d.endsWith('/public/downloads')) return;
     let entries = [];
     try { entries = readdirSync(d, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)); } catch { return; }
     for (const e of entries) {

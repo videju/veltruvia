@@ -3,8 +3,8 @@
   "productName": "VELTRUVIA Doctor",
   "publish": {
     "provider": "github",
-    "owner": "sakshibiradar022002-wq",
-    "repo": "veltruvia1"
+    "owner": "videju",
+    "repo": "veltruvia"
   },
   "directories": {
     "output": "dist-desktop"
@@ -12,6 +12,7 @@
   "files": [
     "src/**/*",
     "public/**/*",
+    "!public/downloads/**/*",
     "electron/**/*",
     "package.json",
     "node_modules/**/*",
@@ -44,6 +45,12 @@
       },
       {
         "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "zip",
         "arch": [
           "x64"
         ]

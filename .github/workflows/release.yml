@@ -1,8 +1,14 @@
 name: Release
 
 # Build + publish a GitHub Release whenever a version tag is pushed.
-# Assets use the EXACT names the in-app download page links to:
-#   VELTRUVIA Server.exe / VELTRUVIA Doctor.exe / VELTRUVIA Patient.apk / VELTRUVIA Lab.apk
+# Assets use the EXACT stable names the in-app download page links to
+# (releases/latest/download/<name> needs a stable name across releases):
+#   VELTRUVIA-Server-Setup.exe / VELTRUVIA-Doctor-Setup.exe
+#   VELTRUVIA-Server-Portable.zip / VELTRUVIA-Doctor-Portable.zip
+#   VELTRUVIA-Patient.apk / VELTRUVIA-Lab.apk / SHA256SUMS.txt / latest.yml
+#
+# Auto-update: latest.yml (Server) is rewritten so its `path` points at the
+# stable installer name; sha512/size still match the identical installer bytes.
 on:
   push:
     tags: ['v*']
@@ -21,21 +27,46 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: VELTRUVIA Server/resources/app
-      - name: Build Server exe
-        run: npx electron-builder --config electron/electron-builder-server.json
+      - name: Build Server (installer + portable zip)
+        shell: pwsh
+        run: |
+          npx electron-builder --config electron/electron-builder-server.json
+          # Stash the Server updater feed immediately: the Doctor build below
+          # writes its own latest.yml into the same folder and would overwrite it.
+          Move-Item dist-desktop/latest.yml dist-desktop/latest-server.yml -Force
         working-directory: VELTRUVIA Server/resources/app
-      - name: Build Doctor exe
+      - name: Build Doctor (installer + portable zip)
         run: npx electron-builder --config electron/electron-builder-doctor.json
         working-directory: VELTRUVIA Server/resources/app
       - name: Stage desktop assets
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item "VELTRUVIA Server/resources/app/dist-desktop/win-unpacked/VELTRUVIA Server.exe" "dist/"
-          Copy-Item "VELTRUVIA Server/resources/app/dist-desktop/win-unpacked/VELTRUVIA Doctor.exe" "dist/"
-          # NSIS installers + latest.yml — electron-updater reads latest.yml for auto-update
-          Copy-Item "VELTRUVIA Server/resources/app/dist-desktop/*.exe" "dist/" -ErrorAction SilentlyContinue
-          Copy-Item "VELTRUVIA Server/resources/app/dist-desktop/latest.yml" "dist/" -ErrorAction SilentlyContinue
+          $s = "VELTRUVIA Server/resources/app/dist-desktop"
+          $d = "VELTRUVIA Doctor/resources/app/dist-desktop"
+
+          # Installers under stable dashed names (never the loose win-unpacked
+          # exe — a bare Electron exe cannot run without its DLLs/paks).
+          Copy-Item "$s/VELTRUVIA Server Setup*.exe" "dist/VELTRUVIA-Server-Setup.exe"
+          Copy-Item "$d/VELTRUVIA Doctor Setup*.exe" "dist/VELTRUVIA-Doctor-Setup.exe"
+
+          # Portable zips (no-install, USB-shareable folders).
+          $zipS = Get-ChildItem "$s/*.zip" | Select-Object -First 1
+          $zipD = Get-ChildItem "$d/*.zip" | Select-Object -First 1
+          if ($zipS) { Copy-Item $zipS.FullName "dist/VELTRUVIA-Server-Portable.zip" }
+          if ($zipD) { Copy-Item $zipD.FullName "dist/VELTRUVIA-Doctor-Portable.zip" }
+
+          # electron-updater feed: point latest.yml at the stable installer
+          # name (bytes unchanged → sha512/size stay valid).
+          Copy-Item "$s/latest-server.yml" "dist/latest.yml"
+          $y = Get-Content "dist/latest.yml" -Raw
+          $y = $y -replace 'VELTRUVIA-Server-Setup-[\d\.]+\.exe', 'VELTRUVIA-Server-Setup.exe'
+          Set-Content "dist/latest.yml" $y -Encoding utf8
+
+          # Differential-update blockmaps, renamed to match the installers.
+          Copy-Item "$s/VELTRUVIA Server Setup*.exe.blockmap" "dist/VELTRUVIA-Server-Setup.exe.blockmap"
+          Copy-Item "$d/VELTRUVIA Doctor Setup*.exe.blockmap" "dist/VELTRUVIA-Doctor-Setup.exe.blockmap" -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v4
         with:
           name: desktop
@@ -74,8 +105,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp mobile/patient/android/app/build/outputs/apk/release/app-release.apk "dist/VELTRUVIA Patient.apk"
-          cp mobile/lab/android/app/build/outputs/apk/release/app-release.apk "dist/VELTRUVIA Lab.apk"
+          cp mobile/patient/android/app/build/outputs/apk/release/app-release.apk "dist/VELTRUVIA-Patient.apk"
+          cp mobile/lab/android/app/build/outputs/apk/release/app-release.apk "dist/VELTRUVIA-Lab.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
@@ -96,16 +127,18 @@ jobs:
       - name: Checksums
         shell: bash
         working-directory: dist
-        run: sha256sum "VELTRUVIA Server.exe" "VELTRUVIA Doctor.exe" "VELTRUVIA Patient.apk" "VELTRUVIA Lab.apk" > SHA256SUMS.txt
+        run: sha256sum VELTRUVIA-*.exe VELTRUVIA-*.zip VELTRUVIA-*.apk > SHA256SUMS.txt
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/VELTRUVIA Server.exe
-            dist/VELTRUVIA Doctor.exe
-            dist/VELTRUVIA Patient.apk
-            dist/VELTRUVIA Lab.apk
+            dist/VELTRUVIA-Server-Setup.exe
+            dist/VELTRUVIA-Doctor-Setup.exe
+            dist/VELTRUVIA-Server-Portable.zip
+            dist/VELTRUVIA-Doctor-Portable.zip
+            dist/VELTRUVIA-Patient.apk
+            dist/VELTRUVIA-Lab.apk
             dist/SHA256SUMS.txt
-            dist/*.exe
             dist/latest.yml
+            dist/VELTRUVIA-Server-Setup.exe.blockmap
           generate_release_notes: true

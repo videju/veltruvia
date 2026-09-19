@@ -196,6 +196,25 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
   color: #4a5f82; border-top: 1px solid var(--border);
 }
 .footer a { color: var(--blue); text-decoration: none; }
+/* ── v2: button rows, QR, PWA banner, checksums ── */
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 10px;}
+.btn-row .download-btn{flex:1 1 auto;justify-content:center;}
+.btn-secondary{background:transparent;border:1px solid var(--border);color:var(--text-muted);}
+.btn-secondary:hover{border-color:var(--blue);color:var(--text);}
+button.download-btn{cursor:pointer;font-family:inherit;font-size:1rem;}
+.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px;margin:6px 0 12px;background:var(--surface);border:1px solid var(--border);border-radius:12px;}
+.qr-wrap img{background:#fff;border-radius:8px;padding:6px;}
+.qr-wrap span{font-size:.85rem;color:var(--text-muted);}
+.ver-badge{display:inline-block;margin-top:8px;padding:4px 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);color:var(--green2);font-size:.85rem;letter-spacing:.5px;}
+.pwa-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;max-width:1000px;margin:26px auto 0;padding:16px 20px;background:var(--surface);border:1px solid var(--border);border-radius:14px;flex-wrap:wrap;}
+.pwa-banner div{display:flex;flex-direction:column;gap:4px;color:var(--text-muted);font-size:.92rem;}
+.checksums{max-width:1000px;margin:44px auto;padding:0 20px;}
+.checksums h2{text-align:center;margin-bottom:8px;}
+.sha-hint{text-align:center;color:var(--text-muted);font-size:.9rem;margin-bottom:14px;}
+.sha-table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+.sha-table td{padding:10px 14px;border-top:1px solid var(--border);font-size:.85rem;}
+.sha-table tr:first-child td{border-top:none;}
+.sha-table td.sha{font-family:ui-monospace,Consolas,monospace;color:var(--blue);}
 </style>
 </head>
 <body>
@@ -215,6 +234,7 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
 <div class="download-section">
   <div class="section-header">
     <h2>Choose Your App</h2>
+    <div class="ver-badge" id="ver-badge" hidden></div>
     <p>All apps connect to one VELTRUVIA Server — install it first (cloud or clinic PC). Phones and the Doctor PC share everything through it.</p>
   </div>
 
@@ -233,14 +253,19 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
       <div class="card-desc">
         Links every app and stores all data. On Windows it sits quietly in the system tray and starts automatically with your PC. For phones to connect from anywhere, deploy it to a cloud VM instead — see <strong>DEPLOY.md</strong>.
       </div>
-      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Server.exe" download>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-        Download Server (.exe)
-      </a>
+      <div class="btn-row">
+        <a class="download-btn" href="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Server-Setup.exe" download>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+          Download Installer
+        </a>
+        <a class="download-btn btn-secondary" href="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Server-Portable.zip" download>
+          Portable ZIP
+        </a>
+      </div>
       <div class="download-meta">
-        <span>📦 ~80 MB</span>
+        <span>📦 Windows installer + portable ZIP</span>
         <span>💻 Windows 10/11 · ☁️ Cloud</span>
-        <span>system tray</span>
+        <span>⚙️ runs in system tray</span>
       </div>
     </div>
 
@@ -257,14 +282,19 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
       <div class="card-desc">
         Full EMR dashboard with patient records, appointment scheduling, clinical notes, lab management, billing, and video calls. Connects to the shared server automatically.
       </div>
-      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Doctor.exe" download>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-        Download Doctor (.exe)
-      </a>
+      <div class="btn-row">
+        <a class="download-btn" href="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Doctor-Setup.exe" download>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+          Download Installer
+        </a>
+        <a class="download-btn btn-secondary" href="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Doctor-Portable.zip" download>
+          Portable ZIP
+        </a>
+      </div>
       <div class="download-meta">
-        <span>📦 ~80 MB</span>
+        <span>📦 Windows installer + portable ZIP</span>
         <span>💻 Windows 10/11</span>
-        <span>🔌 No install</span>
+        <span>🩺 full EMR dashboard</span>
       </div>
     </div>
 
@@ -281,14 +311,21 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
       <div class="card-desc">
         Log daily symptoms, track medications, view appointments, and message your care team — right from your phone. Everything syncs to the server.
       </div>
-      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Patient.apk" download>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-        Download Patient (.apk)
-      </a>
+      <div class="btn-row">
+        <a class="download-btn" href="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Patient.apk" download>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+          Download APK
+        </a>
+        <button class="download-btn btn-secondary" type="button" data-qr="qr-patient">📱 Scan QR</button>
+      </div>
+      <div class="qr-wrap" id="qr-patient" hidden>
+        <img data-url="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Patient.apk" alt="Patient APK QR code" width="260" height="260">
+        <span>Scan with your phone camera to install</span>
+      </div>
       <div class="download-meta">
-        <span>📦 ~10 MB</span>
+        <span>📦 ~7 MB APK</span>
         <span>🤖 Android 8+</span>
-        <span>iPhone → Add to Home Screen</span>
+        <span>🍎 iPhone → web install below</span>
       </div>
     </div>
 
@@ -305,18 +342,42 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
       <div class="card-desc">
         Manage lab test orders, upload results, and track sample status from any phone. Task lists arrive from the doctor in real time.
       </div>
-      <a class="download-btn" href="https://github.com/sakshibiradar022002-wq/veltruvia1/releases/latest/download/VELTRUVIA%20Lab.apk" download>
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
-        Download Lab (.apk)
-      </a>
+      <div class="btn-row">
+        <a class="download-btn" href="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Lab.apk" download>
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+          Download APK
+        </a>
+        <button class="download-btn btn-secondary" type="button" data-qr="qr-lab">📱 Scan QR</button>
+      </div>
+      <div class="qr-wrap" id="qr-lab" hidden>
+        <img data-url="https://github.com/videju/veltruvia/releases/latest/download/VELTRUVIA-Lab.apk" alt="Lab APK QR code" width="260" height="260">
+        <span>Scan with your phone camera to install</span>
+      </div>
       <div class="download-meta">
-        <span>📦 ~10 MB</span>
+        <span>📦 ~7 MB APK</span>
         <span>🤖 Android 8+</span>
-        <span>iPhone → Add to Home Screen</span>
+        <span>🍎 iPhone → web install below</span>
       </div>
     </div>
 
   </div>
+</div>
+
+<!-- ── Install as Web App (PWA) ── -->
+<div class="pwa-banner" id="pwa-banner" hidden>
+  <div>
+    <strong>No download needed — install this portal as an app.</strong>
+    <span id="pwa-ios-hint" hidden>On iPhone/iPad: tap <strong>Share</strong> → <strong>Add to Home Screen</strong>.</span>
+    <span id="pwa-chrome-hint" hidden>Works on Android phones, and on desktop Chrome/Edge — always up to date, no installer.</span>
+  </div>
+  <button class="download-btn" id="pwa-install" type="button" hidden>⬇️ Install as App</button>
+</div>
+
+<!-- ── Checksums ── -->
+<div class="checksums" id="checksums" hidden>
+  <h2>Verify Your Download</h2>
+  <p class="sha-hint">Compare the SHA-256 of the file you downloaded (on Windows: <code>certutil -hashfile &lt;file&gt; SHA256</code>) against this list, generated at release time.</p>
+  <table class="sha-table"><tbody id="sha-rows"></tbody></table>
 </div>
 
 <!-- ── How It Works ── -->
@@ -406,8 +467,9 @@ h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: -1px; margin-bottom: 1
 </div>
 
 <div class="footer">
-  <p>VELTRUVIA Pro · Built with ❤️ for neuro-oncology care · <a href="https://github.com/sakshibiradar022002-wq/veltruvia1">View Source on GitHub</a></p>
+  <p>VELTRUVIA Pro · Built with ❤️ for neuro-oncology care · <a href="https://github.com/videju/veltruvia">View Source on GitHub</a></p>
 </div>
 
 </body>
+<script src="/js/download-page.js" defer></script>
 </html>
