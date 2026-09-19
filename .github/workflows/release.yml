@@ -60,19 +60,22 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path dist | Out-Null
+          # Both electron-builder invocations run from the Server bundle's cwd,
+          # so every artifact (either app's) lands in THIS dist-desktop.
           $s = "VELTRUVIA Server/resources/app/dist-desktop"
-          $d = "VELTRUVIA Doctor/resources/app/dist-desktop"
 
           # Installers under stable dashed names (never the loose win-unpacked
           # exe — a bare Electron exe cannot run without its DLLs/paks).
           Copy-Item "$s/VELTRUVIA Server Setup*.exe" "dist/VELTRUVIA-Server-Setup.exe"
-          Copy-Item "$d/VELTRUVIA Doctor Setup*.exe" "dist/VELTRUVIA-Doctor-Setup.exe"
+          Copy-Item "$s/VELTRUVIA Doctor Setup*.exe" "dist/VELTRUVIA-Doctor-Setup.exe"
 
-          # Portable zips (no-install, USB-shareable folders).
-          $zipS = Get-ChildItem "$s/*.zip" | Select-Object -First 1
-          $zipD = Get-ChildItem "$d/*.zip" | Select-Object -First 1
+          # Portable zips (no-install, USB-shareable folders), matched by prefix:
+          # electron-builder emits e.g. "VELTRUVIA Doctor-2.0.1-win.zip".
+          $zipS = Get-ChildItem "$s/VELTRUVIA Server-*.zip" | Select-Object -First 1
+          $zipD = Get-ChildItem "$s/VELTRUVIA Doctor-*.zip" | Select-Object -First 1
           if ($zipS) { Copy-Item $zipS.FullName "dist/VELTRUVIA-Server-Portable.zip" }
           if ($zipD) { Copy-Item $zipD.FullName "dist/VELTRUVIA-Doctor-Portable.zip" }
+          if (-not ($zipS -and $zipD)) { Write-Error "portable zips missing from $s" }
 
           # electron-updater feed: point latest.yml at the stable installer
           # name (bytes unchanged → sha512/size stay valid).
@@ -83,7 +86,7 @@ jobs:
 
           # Differential-update blockmaps, renamed to match the installers.
           Copy-Item "$s/VELTRUVIA Server Setup*.exe.blockmap" "dist/VELTRUVIA-Server-Setup.exe.blockmap"
-          Copy-Item "$d/VELTRUVIA Doctor Setup*.exe.blockmap" "dist/VELTRUVIA-Doctor-Setup.exe.blockmap" -ErrorAction SilentlyContinue
+          Copy-Item "$s/VELTRUVIA Doctor Setup*.exe.blockmap" "dist/VELTRUVIA-Doctor-Setup.exe.blockmap" -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@v4
         with:
           name: desktop
@@ -130,8 +133,17 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp mobile/patient/android/app/build/outputs/apk/release/app-release.apk "dist/VELTRUVIA-Patient.apk"
-          cp mobile/lab/android/app/build/outputs/apk/release/app-release.apk "dist/VELTRUVIA-Lab.apk"
+          # Strictly the SIGNED apk (app-release.apk). An unsigned variant means
+          # the signingConfig injection failed — fail loudly, never ship it.
+          for app in patient lab; do
+            out="mobile/$app/android/app/build/outputs/apk/release"
+            if [ -f "$out/app-release.apk" ]; then
+              cp "$out/app-release.apk" "dist/VELTRUVIA-${app^}.apk"
+            else
+              echo "::error::$app: no signed app-release.apk in $out"; ls -la "$out"; exit 1
+            fi
+          done
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
           name: android

@@ -17,6 +17,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } fr
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stampGradle, computeVersionCode } from './gradle-stamp.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const app = process.argv[2];
@@ -120,17 +121,13 @@ if (cap.status !== 0) {
 
 // Stamp the app version from package.json into the generated gradle config:
 // a fresh `cap add android` ships versionCode 1, which would be a *downgrade*
-// for phones already running an earlier release.
+// for phones already running an earlier release. Also ensures the release
+// signingConfig exists (generated projects have none → unsigned APK on CI).
 const pkg = JSON.parse(readFileSync(join(mobileDir, 'package.json'), 'utf8'));
-const [vMaj, vMin, vPatch] = String(pkg.version).split('.').map(Number);
-const versionCode = vMaj * 10000 + vMin * 100 + (vPatch || 0); // 2.0.1 → 20001
 const gradleFile = join(androidDir, 'app', 'build.gradle');
-let gradleSrc = readFileSync(gradleFile, 'utf8');
-gradleSrc = gradleSrc
-  .replace(/versionCode \d+/, `versionCode ${versionCode}`)
-  .replace(/versionName "[^"]*"/, `versionName "${pkg.version}"`);
-writeFileSync(gradleFile, gradleSrc);
-console.log(`   ✅ stamped version ${pkg.version} (versionCode ${versionCode})`);
+const stamped = stampGradle(readFileSync(gradleFile, 'utf8'), pkg.version);
+writeFileSync(gradleFile, stamped);
+console.log(`   ✅ stamped version ${pkg.version} (versionCode ${computeVersionCode(pkg.version)})`);
 
 const gradle = process.platform === 'win32' ? 'gradlew.bat' : './gradlew';
 const task = release ? 'assembleRelease' : 'assembleDebug';
