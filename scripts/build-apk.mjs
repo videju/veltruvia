@@ -8,8 +8,9 @@
 //
 // Steps:
 //   1. Copy the shared web UI (public/) into mobile/<app>/www
-//   2. Bake the server URL into window.__VELTRUVIA_API_BASE__
-//   3. If an android/ project exists → cap sync + gradle assemble
+//   2. Bake the server URL into <meta name="veltruvia-api-base"> (CSP-safe)
+//   3. Prune the other role's UI — each app ships only its own portal
+//   4. If an android/ project exists → cap sync + gradle assemble
 //      If not → print the one-time setup commands (needs Android Studio).
 // ═════════════════════════════════════════════════════════════════════
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -26,14 +27,16 @@ if (app !== 'patient' && app !== 'lab') {
   process.exit(1);
 }
 
-const apiBase = (process.env.VELTRUVIA_API_BASE || 'http://10.0.2.2:3000').replace(/\/+$/, '');
+// No dev default: a build with no baked URL must not point at the emulator
+// loopback. Users set the address in-app (⚙ button) or it stays same-origin.
+const apiBase = (process.env.VELTRUVIA_API_BASE || '').replace(/\/+$/, '');
 const publicDir = join(root, 'VELTRUVIA Server', 'resources', 'app', 'public');
 const mobileDir = join(root, 'mobile', app);
 const wwwDir = join(mobileDir, 'www');
 const androidDir = join(mobileDir, 'android');
 
 console.log(`\n📱 Building VELTRUVIA ${app[0].toUpperCase() + app.slice(1)} APK`);
-console.log(`   Server baked in: ${apiBase}\n`);
+console.log(`   Server baked in: ${apiBase || '(none — set in-app via ⚙)'}\n`);
 
 // ── 1. Web assets ───────────────────────────────────────────────────
 rmSync(wwwDir, { recursive: true, force: true });
@@ -42,23 +45,26 @@ cpSync(publicDir, wwwDir, { recursive: true });
 // Never ship the /downloads/ file-share folder (hosted installers) inside an APK.
 rmSync(join(wwwDir, 'downloads'), { recursive: true, force: true });
 
-// Keep the APK lean: desktop-only pages and the doctor portal aren't used on phones.
-for (const name of ['index.html', 'admin.html', 'blockchain.html', 'download.html',
-  'index.html.bak', 'lab.html.bak']) {
-  rmSync(join(wwwDir, name), { force: true });
-}
-for (const name of ['page/index-1-helpers.js', 'page/index-2-record.js', 'page/index-3-reports.js',
-  'page/index-4-standalone.js', 'page/admin-1-boot.js', 'page/admin-2-app.js',
-  'page/blockchain-1-app.js']) {
-  rmSync(join(wwwDir, 'js', name), { force: true });
-}
-
-// ── 2. Bake the API base ────────────────────────────────────────────
-const marker = "window.__VELTRUVIA_API_BASE__='';";
+// Ship only this role's UI: drop the other portals, desktop-only pages and
+// the doctor portal (phones use the Patient and Lab apps only).
 const entry = app === 'patient' ? 'patient.html' : 'lab.html';
+const otherEntry = app === 'patient' ? 'lab.html' : 'patient.html';
+const dropHtml = [otherEntry, 'admin.html', 'blockchain.html', 'download.html',
+  'index.html.bak', 'lab.html.bak'];
+const dropJs = ['page/index-1-helpers.js', 'page/index-2-record.js', 'page/index-3-reports.js',
+  'page/index-4-standalone.js', 'page/admin-1-boot.js', 'page/admin-2-app.js',
+  'page/blockchain-1-app.js', 'patient-pages.js'];
+if (app === 'patient') dropJs.push('page/lab-1-app.js');
+else dropJs.push('page/patient-1-core.js', 'page/patient-2-app.js', 'page/patient-3-boot.js');
+
+for (const name of dropHtml) rmSync(join(wwwDir, name), { force: true });
+for (const name of dropJs) rmSync(join(wwwDir, 'js', name), { force: true });
+
+// ── 2. Bake the API base + role-specific PWA manifest/icons ─────────
+const marker = '<meta name="veltruvia-api-base" content="">';
 const entryPath = join(wwwDir, entry);
 if (!existsSync(entryPath)) {
-  console.error(`   ❌ ${entry} missing from public/ — sync-bundles first.`);
+  console.error(`   ❌ ${entry} missing from public/ — run sync-bundles first.`);
   process.exit(1);
 }
 let html = readFileSync(entryPath, 'utf8');
@@ -66,8 +72,23 @@ if (!html.includes(marker)) {
   console.error(`   ❌ API-base marker not found in ${entry} — expected: ${marker}`);
   process.exit(1);
 }
-html = html.replace(marker, `window.__VELTRUVIA_API_BASE__='${apiBase}';`);
+html = html.replace(marker, `<meta name="veltruvia-api-base" content="${apiBase}">`);
 writeFileSync(entryPath, html);
+
+// Role-specific app name and icons in the PWA manifest.
+const manifestPath = join(wwwDir, 'manifest.json');
+try {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const role = app === 'patient' ? 'patient' : 'lab';
+  manifest.name = `VELTRUVIA ${role === 'patient' ? 'Patient' : 'Lab'}`;
+  manifest.short_name = manifest.name;
+  for (const icon of manifest.icons || []) {
+    icon.src = icon.src.replace(/\/icons\/[a-z-]+-/, `/icons/${role}-`);
+  }
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+} catch (e) {
+  console.log(`   ⚠️  manifest.json untouched: ${e.message}`);
+}
 
 // Capacitor requires www/index.html as the web entry — redirect to the portal.
 writeFileSync(join(wwwDir, 'index.html'),
@@ -75,16 +96,16 @@ writeFileSync(join(wwwDir, 'index.html'),
   `<script>location.replace('${entry}');</script>` +
   `<meta http-equiv="refresh" content="0;url=${entry}"></head>` +
   `<body style="background:#080d1a;color:#e2e8f0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">Opening VELTRUVIA…</body></html>`);
-console.log(`   ✅ www/ prepared (${entry} → ${apiBase})`);
+console.log(`   ✅ www/ prepared (${entry}${apiBase ? ` → ${apiBase}` : ', no baked URL'})`);
+console.log(`   ✅ Pruned ${dropHtml.length + dropJs.length} non-${app} files`);
 
 // ── 3. Android project ──────────────────────────────────────────────
 if (!existsSync(androidDir)) {
   console.log(`    ⚠️  No android/ project yet — one-time setup (needs JDK 21 + Android SDK):
 
-       cd "${mobileDir}"
-       npm install
-       npx cap add android
-       npm run apk:debug        # or this script again
+     cd "${mobileDir}"
+     npm install
+     npx cap add android
 
    The www/ payload above is ready; cap add simply wraps it.`);
   process.exit(0);

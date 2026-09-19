@@ -112,3 +112,7 @@ VELTRUVIA Server/VELTRUVIA Doctor.exe
 
 # Test-run runtime store (recreated by npm test)
 hardening-tmp/
+
+# Windows code-signing secrets (self-signed placeholder cert)
+veltruvia-codesign.pfx
+.codesign-pfx-pass

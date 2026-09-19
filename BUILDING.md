@@ -21,19 +21,21 @@ each app's entry via `extraMetadata.main`:
 
 ## Rebuilding the executables
 
-From `VELTRUVIA Server/resources/app/`:
+Run electron-builder from the **Server** bundle directory (it has the working
+local electron-builder install) and pass each app's config by path — running
+npx from the client bundles can resolve a broken cached electron-builder:
 
 ```bash
-npm ci
-npx electron-builder --config electron/electron-builder-server.json
-npx electron-builder --config electron/electron-builder-doctor.json
-npx electron-builder --config electron/electron-builder-patient.json
-npx electron-builder --config electron/electron-builder-lab.json
+cd "VELTRUVIA Server/resources/app"
+npx electron-builder --config electron/electron-builder-server.json --publish never
+npx electron-builder --config "..\..\..\VELTRUVIA Doctor\resources\app\electron\electron-builder-doctor.json" --publish never
 ```
 
-Output lands in `dist-desktop/` per bundle (dir target, x64, unsigned).
-After rebuilding, copy the new exe + runtime files into each top-level
-`VELTRUVIA <App>/` folder and delete any stale `*.exe.new` artifacts.
+Note: all configs write into the same `dist-desktop/` — each build replaces
+`win-unpacked/`, so copy/sign each exe before building the next app. The
+shippable Windows artifacts are the **NSIS installers** (`Setup <version>.exe`);
+the loose `win-unpacked\*.exe` can never run standalone (it needs its sibling
+DLLs/paks). Sign installers right after each build (see below).
 
 ## Build size & signing
 
@@ -43,15 +45,22 @@ set `compression: maximum`. Native modules (`*.node`) are unpacked.
 
 To sign the exes (Windows):
 
-```bash
+A self-signed placeholder already exists at the repo root
+(`veltruvia-codesign.pfx` + `.codesign-pfx-pass`, cert in the current-user
+store, thumbprint 41C3FA186F6E35C0A980FD401CC8EB096F03917A). electron-builder
+picks it up automatically via CSC_LINK/CSC_KEY_PASSWORD, or sign afterwards:
+
+```powershell
 # PowerShell (from VELTRUVIA Server/resources/app/)
 $env:CSC_LINK="C:\path\to\cert.pfx"      # or certificateSubjectName via signtool
 $env:CSC_KEY_PASSWORD="<pfx password>"
 npx electron-builder --config electron/electron-builder-server.json
 ```
 
-electron-builder picks up `CSC_LINK`/`CSC_KEY_PASSWORD` automatically; no
-secrets live in the repo. Verify with `Get-AuthenticodeSignature .\VELTRUVIA.exe`.
+Replace the self-signed cert with a CA-issued (OV/EV) certificate for any
+distribution beyond this machine — until then SmartScreen shows
+"Unknown publisher" on the installers. Verify with
+`Get-AuthenticodeSignature .\dist-desktop\*.exe`.
 
 ## Building the mobile APKs (Patient & Lab)
 
@@ -63,13 +72,17 @@ JDK 21 (Capacitor 7 requires it — JDK 17 fails with "invalid source release: 2
 From the repo root:
 
 ```bash
-npm run apk:patient                                    # debug APK (points at 10.0.2.2:3000 emulator loopback)
+npm run apk:patient                                    # debug APK (no baked server URL)
 VELTRUVIA_API_BASE=https://emr.yourclinic.com npm run apk:lab   # bake the cloud server in
 npm run apk:patient -- --release                       # release APK (must be signed)
 ```
 
+Each APK ships ONLY its own portal: the build prunes the other role's HTML/JS,
+the desktop-only pages and `patient-pages.js`, and rewrites the PWA manifest
+to the app's own name and icons. No emulator URL is ever baked in — leave
+`VELTRUVIA_API_BASE` unset and users configure the server in-app (⚙ button).
+
 Output: `mobile/<app>/android/app/build/outputs/apk/<debug|release>/`.
-The server address is baked at build time but changeable in-app (⚙ button).
 
 ### Signing the APKs (release)
 
