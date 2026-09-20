@@ -7,8 +7,9 @@ only real question is *which address each app points at*. Pick your scenario:
 | Scenario | What you get | Effort |
 |---|---|---|
 | **A. Same building (one Wi-Fi)** | Works today, fully offline, nothing leaves the building | Zero — scan a QR |
-| **B. Different cities, private** (Tailscale) | Encrypted remote access, data stays on your PC, free | ~10 min, once |
-| **C. Different cities, public** (cloud VM) | Any internet device on Earth can connect over HTTPS | ~30 min + ~$6/mo VPS |
+| **A+. Free cloud tunnel — any internet** | Phones/Doctors connect from anywhere; **data still lives only on your PC** | Zero — run `START-CLOUD-TUNNEL.bat` |
+| **B. Different cities, private** (Tailscale) | Encrypted remote access, data stays on your PC, free, permanent address | ~10 min, once |
+| **C. Different cities, public** (cloud VM) | Any internet device on Earth can connect over HTTPS, always-on | ~30 min + ~$6/mo VPS |
 
 ---
 
@@ -23,10 +24,31 @@ only real question is *which address each app points at*. Pick your scenario:
 5. Doctor PCs in the same building: install `VELTRUVIA-Doctor-Setup.exe` —
    it finds the local server **automatically** (no address needed).
 
+## A+. Free cloud tunnel — connect from anywhere, data stays on your PC
+
+No signup, no cost, no router changes. Your PC runs a tiny Cloudflare
+connector (`cloudflared`) that gives the server a public **https** address;
+the internet reaches the doorway, **all data stays on your PC**.
+
+1. Double-click **`START-CLOUD-TUNNEL.bat`** (in the ventruvia folder).
+2. It shows (and copies) an address like
+   `https://something.trycloudflare.com` — that's your clinic's web address.
+3. Point apps at it:
+   - **Phones:** ⚙ → paste the address (works on mobile data, any city)
+   - **Doctor PCs:** env var `VELTRUVIA_SERVER_URL=<address>`, or
+     `%APPDATA%\VELTRUVIA-shared\server-config.json` →
+     `{"serverUrl": "<address>"}`
+4. Share the address + the APKs; recipients don't need anything else.
+
+Limitations (why B/C exist): your PC must stay on, and the address is
+**regenerated each time the tunnel restarts** — resend it, or upgrade to
+Tailscale/VM for a permanent one. The tunnel is a doorway only: no data is
+stored in any cloud.
+
 ## B. Different cities — private (Tailscale, recommended)
 
 Free (up to 100 devices), WireGuard-encrypted, **data stays on your PC** —
-nothing is exposed to the public internet.
+nothing is exposed to the public internet, and the address never changes.
 
 1. On the **server PC**: install https://tailscale.com and sign in.
 2. On **every phone and Doctor PC** that should connect remotely: install
@@ -43,7 +65,8 @@ nothing is exposed to the public internet.
 
 ## C. Different cities — public (cloud VM with HTTPS)
 
-Any device on any network connects to one public address.
+Any device on any network connects to one public address, even when your
+PC is off.
 
 1. Rent a small VM (Hetzner/DigitalOcean ~$6/mo) with a domain like
    `emr.yourclinic.com`.
@@ -64,7 +87,7 @@ Any device on any network connects to one public address.
 |---|---|---|
 | Clinic PC (same building) | `ventruvia` folder (or GitHub release link) | Run `INSTALL-ALL.bat` — connected automatically |
 | Phone (same building) | Just the **QR on the download page** | Scan → install → paste address |
-| Phone (anywhere) | `VELTRUVIA-Patient.apk` / `-Lab.apk` + your server address (B or C above) | Install → ⚙ → paste address |
+| Phone (anywhere) | APK + your tunnel/Tailscale/https address | Install → ⚙ → paste address |
 | Doctor anywhere | `VELTRUVIA-Doctor-Setup.exe` + the address | Install → env var or `server-config.json` |
 | No-internet clinic | Whole `ventruvia` folder on USB | `README-FIRST.txt` inside walks them through |
 
@@ -72,4 +95,5 @@ Any device on any network connects to one public address.
 
 Open the server’s dashboard → patients/records you create on any connected
 app appear for all the others within seconds. The tray menu shows every
-address the server is reachable on (local + LAN).
+address the server is reachable on (local + LAN), and `CLOUD-URL.txt` holds
+the current public one.
