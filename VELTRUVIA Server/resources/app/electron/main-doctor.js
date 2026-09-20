@@ -283,7 +283,7 @@ ipcMain.handle('blockchain:records', (_, mrn) => blockchain.getPatientRecords(mr
 app.whenReady().then(async () => {
   try {
     // Auto-update via GitHub Releases (no-op in dev / before first release)
-    try { setupAutoUpdate(); } catch {}
+    try { setupAutoUpdate({ channel: 'latest-doctor' }); } catch {}
 
     serverPort = await findFreePort();
     httpServer = createServer(serveStatic);

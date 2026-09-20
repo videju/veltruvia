@@ -15,11 +15,15 @@ const { autoUpdater } = electronUpdaterPkg;
 
 const log = (msg) => console.log('[updater]', msg);
 
-export function setupAutoUpdate({ intervalMs = 6 * 60 * 60 * 1000, silent = true } = {}) {
+export function setupAutoUpdate({ intervalMs = 6 * 60 * 60 * 1000, silent = true, channel = null } = {}) {
   const app = electron.app;
   if (!app || !app.isPackaged) { log('skipped (not packaged)'); return null; }
 
   autoUpdater.logger = { info: log, warn: log, error: (m) => console.error('[updater]', m) };
+  // Per-app update feed: without this, every exe would read the Server's
+  // latest.yml and e.g. the Doctor app would "update" itself into the
+  // Server installer. channel 'latest-doctor' → fetches latest-doctor.yml.
+  if (channel) autoUpdater.channel = channel;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 

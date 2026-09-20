@@ -87,6 +87,15 @@ jobs:
           # Differential-update blockmaps, renamed to match the installers.
           Copy-Item "$s/VELTRUVIA Server Setup*.exe.blockmap" "dist/VELTRUVIA-Server-Setup.exe.blockmap"
           Copy-Item "$s/VELTRUVIA Doctor Setup*.exe.blockmap" "dist/VELTRUVIA-Doctor-Setup.exe.blockmap" -ErrorAction SilentlyContinue
+
+          # Doctor's own updater feed. The Doctor build ran last, so
+          # dist-desktop/latest.yml currently holds the DOCTOR feed — publish
+          # it as latest-doctor.yml so the Doctor exe never reads the Server's
+          # feed (it would otherwise install the Server installer over itself).
+          Move-Item "$s/latest.yml" "dist/latest-doctor.yml" -Force
+          $yd = Get-Content "dist/latest-doctor.yml" -Raw
+          $yd = $yd -replace 'VELTRUVIA-Doctor-Setup-[\d\.]+\.exe', 'VELTRUVIA-Doctor-Setup.exe'
+          Set-Content "dist/latest-doctor.yml" $yd -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: desktop
@@ -177,5 +186,6 @@ jobs:
             dist/VELTRUVIA-Lab.apk
             dist/SHA256SUMS.txt
             dist/latest.yml
+            dist/latest-doctor.yml
             dist/VELTRUVIA-Server-Setup.exe.blockmap
           generate_release_notes: true
