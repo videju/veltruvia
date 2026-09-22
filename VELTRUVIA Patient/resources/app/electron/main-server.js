@@ -114,8 +114,11 @@ function serveStatic(req, res) {
 async function tryLoadExpress(port) {
   try {
     process.env.PORT = String(port);
-    if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
     process.env.ELECTRON_RUN = '1';
+    // NOTE: NODE_ENV must NOT be defaulted to 'development' before .env loads.
+    // dotenv never overrides existing vars — pre-setting NODE_ENV here pinned the
+    // packaged app to dev mode forever (no Secure cookies, no HSTS, OTP echo).
+    // .env is loaded below, after sharedRoot is found; production rules live in src/config.js.
     const { app: electronApp } = await import('electron');
     const userData = electronApp.getPath('userData');
     const { mkdirSync } = await import('node:fs');

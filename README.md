@@ -66,7 +66,7 @@ The database is protected against the corruption class observed in the wild
   startup, it is quarantined (`*.corrupt-<timestamp>`, never deleted) and the
   newest valid backup from `data/backups/` is restored automatically.
 - **Boot restore point** — every healthy boot snapshots the DB to
-  `data/backups/` (newest 14 kept) so a fresh backup always exists.
+  `data/backups/` (newest 30 kept) so a fresh backup always exists.
 - **Boot watchdog** — the Server exe retries a failed API load and, if a
   corrupt database was the cause, self-heals before surfacing a visible error.
 

@@ -119,3 +119,12 @@ veltruvia-codesign.pfx
 
 # Offline download mirror is machine-local (binaries live in dist/)
 "VELTRUVIA Server/resources/app/public/downloads/"
+
+# LAN TLS private key — never commit
+config/tls/
+
+# local-only secret vaults & rotation artifacts
+keys.vault.bin
+.env.pre-rotation-*
+# in-app artifact mirror (large binaries, refreshed locally)
+VELTRUVIA Server/resources/app/public/downloads/

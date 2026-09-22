@@ -102,3 +102,34 @@
     })
     .catch(() => { /* no checksums file served — section stays hidden */ });
 })();
+
+// ── Connect-a-phone pairing QR ──────────────────────────
+// Encodes THIS server's address (window.location.origin) so a phone on
+// the same Wi-Fi opens this page by scanning — installs an APK from it,
+// then pastes the same address into the app's ⚙ screen. No typing.
+(function () {
+  'use strict';
+  var card = document.getElementById('connect-card');
+  if (!card) return;
+  var origin = window.location.origin;
+  if (!origin || origin === 'null' || /^file:/i.test(origin)) return; // opened from disk — nothing to point at
+  var img = document.getElementById('connect-qr-img');
+  var addr = document.getElementById('connect-address');
+  if (addr) addr.textContent = origin;
+  if (img) {
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=170x170&margin=4&data=' + encodeURIComponent(origin);
+  }
+  card.hidden = false;
+  var btn = document.getElementById('copy-address');
+  if (btn && addr) btn.addEventListener('click', function () {
+    var done = function () { btn.textContent = 'Copied ✓'; setTimeout(function () { btn.textContent = 'Copy'; }, 2000); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(origin).then(done, function () { done(); });
+    } else {
+      // Plain-HTTP LAN page: clipboard API is unavailable — select instead
+      var range = document.createRange(); range.selectNodeContents(addr);
+      var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+      btn.textContent = 'Press Ctrl+C'; setTimeout(function () { btn.textContent = 'Copy'; }, 2500);
+    }
+  });
+})();

@@ -206,6 +206,20 @@ button.download-btn{cursor:pointer;font-family:inherit;font-size:1rem;}
 .qr-wrap img{background:#fff;border-radius:8px;padding:6px;}
 .qr-wrap span{font-size:.85rem;color:var(--text-muted);}
 .ver-badge{display:inline-block;margin-top:8px;padding:4px 12px;border-radius:999px;background:var(--surface2);border:1px solid var(--border);color:var(--green2);font-size:.85rem;letter-spacing:.5px;}
+/* ── Connect-a-phone pairing card ─────────────────────────── */
+.connect-card{display:flex;gap:22px;align-items:center;margin:26px auto 6px;max-width:960px;padding:22px 26px;border:1px solid var(--border);border-radius:14px;background:var(--surface2);}
+.connect-qr{flex:0 0 auto;background:#fff;padding:8px;border-radius:10px;}
+.connect-qr img{display:block;width:170px;height:170px;}
+.connect-info{flex:1;min-width:0;}
+.connect-info h3{margin:0 0 6px;font-size:17px;}
+.connect-info p{margin:4px 0;color:var(--text-muted);font-size:13.5px;}
+.connect-steps{margin:10px 0 6px;padding-left:20px;color:var(--text-muted);font-size:13.5px;line-height:1.75;}
+.connect-steps code{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:2px 7px;color:var(--blue);font-size:12.5px;word-break:break-all;}
+.copy-btn{margin-left:8px;padding:3px 12px;border-radius:999px;border:1px solid var(--border);background:var(--surface2);color:var(--blue);font-size:12px;cursor:pointer;}
+.copy-btn:hover{border-color:var(--blue);}
+.connect-note{margin-top:8px;font-size:12.5px;}
+.connect-note a{color:var(--blue);}
+@media(max-width:640px){.connect-card{flex-direction:column;text-align:center;}.connect-steps{text-align:left;}}
 .pwa-banner{display:flex;align-items:center;justify-content:space-between;gap:14px;max-width:1000px;margin:26px auto 0;padding:16px 20px;background:var(--surface);border:1px solid var(--border);border-radius:14px;flex-wrap:wrap;}
 .pwa-banner div{display:flex;flex-direction:column;gap:4px;color:var(--text-muted);font-size:.92rem;}
 .checksums{max-width:1000px;margin:44px auto;padding:0 20px;}
@@ -236,6 +250,20 @@ button.download-btn{cursor:pointer;font-family:inherit;font-size:1rem;}
     <h2>Choose Your App</h2>
     <div class="ver-badge" id="ver-badge" hidden></div>
     <p>All apps connect to one VELTRUVIA Server — install it first (cloud or clinic PC). Phones and the Doctor PC share everything through it.</p>
+  </div>
+
+  <div class="connect-card" id="connect-card" hidden>
+    <div class="connect-qr"><img id="connect-qr-img" alt="QR code — open this page on your phone"></div>
+    <div class="connect-info">
+      <h3>📱 Connect a phone — one scan</h3>
+      <p>This QR opens <strong>this exact page</strong> on any phone using the same Wi-Fi — no typing the address.</p>
+      <ol class="connect-steps">
+        <li>Scan with the phone's camera → this page opens on the phone</li>
+        <li>Tap <strong>Patient</strong> or <strong>Lab</strong> below to install the app</li>
+        <li>Open the app → ⚙ → paste this address: <code id="connect-address"></code><button class="copy-btn" id="copy-address" type="button">Copy</button></li>
+      </ol>
+      <p class="connect-note">Phone is in a <strong>different building or city?</strong> See <a href="https://github.com/videju/veltruvia/blob/main/CONNECT-ANYWHERE.md" target="_blank" rel="noopener">CONNECT-ANYWHERE.md</a> — Tailscale (free &amp; private) or a cloud server (works worldwide).</p>
+    </div>
   </div>
 
   <div class="download-grid">

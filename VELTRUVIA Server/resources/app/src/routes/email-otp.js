@@ -114,8 +114,11 @@ emailOtpRouter.post('/send', otpLimiter, validate(sendOtpSchema), asyncHandler(a
     }
   }
 
-  // Dev fallback: include OTP in response so it shows on screen
-  if (!delivered) {
+  // Screen fallback ONLY outside production: in production an undeliverable
+  // OTP must NEVER be echoed to the client (anyone reaching the API could
+  // otherwise register or verify any email without owning it).
+  // Fix: configure SMTP — see SETUP-EMAIL.md at the repo root.
+  if (!delivered && process.env.NODE_ENV !== 'production') {
     devOtp = otp;
     deliveryMethod = 'dev';
   }
@@ -130,7 +133,9 @@ emailOtpRouter.post('/send', otpLimiter, validate(sendOtpSchema), asyncHandler(a
     ok: true,
     message: delivered
       ? `Verification code sent to ${email}`
-      : 'Email not configured — enter the code shown below',
+      : (process.env.NODE_ENV === 'production'
+        ? 'Email delivery is not configured on this server — contact your administrator.'
+        : 'Email delivery is not configured on this server — contact your administrator.'),
     delivery: deliveryMethod,
     // Only include OTP in dev mode (when email didn't send)
     ...(devOtp ? { otp: devOtp, expiresIn: '10 minutes' } : {}),
