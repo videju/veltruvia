@@ -1,6 +1,6 @@
 {
   "name": "veltruvia-server",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "VELTRUVIA neuro-oncology EMR — secure backend (Node + Express + SQLite)",
   "author": "VELTRUVIA <support@veltruvia.example>",
   "type": "module",
@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@noble/hashes": "^1.8.0",
-    "electron": "^33.0.0",
+    "electron": "^35.7.5",
     "electron-builder": "^26.15.3"
   },
   "overrides": {
