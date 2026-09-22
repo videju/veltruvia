@@ -20,7 +20,12 @@ const dbPath = join(appDir, 'test-verify.db');const runtimeFiles = ['.demo-admin
   'availability-store.json', 'logs-store.json', 'messages-store.json',
   'telehealth-rooms.json', 'telehealth-signals.json', 'chain.json'].map(f => join(appDir, f));
 for (const f of [dbPath, dbPath + '-wal', dbPath + '-shm', ...runtimeFiles]) { try { rmSync(f); } catch {} }
-const server = spawn('node', ['src/server.js'], {
+// Node binary override: VELTRUVIA_NODE=/path/to/electron.exe (with
+// ELECTRON_RUN_AS_NODE=1) lets the whole suite run under a different
+// runtime — e.g. to prove the app's 69 checks pass on the node:sqlite
+// backend shipped inside newer Electron builds.
+const nodeBin = process.env.VELTRUVIA_NODE || 'node';
+const server = spawn(nodeBin, ['src/server.js'], {
   cwd: appDir,
   env: {
     ...process.env,
@@ -38,6 +43,7 @@ let out = '';
 server.stdout.on('data', d => { out += d; });
 server.stderr.on('data', d => { out += d; });
 server.on('error', e => { console.error('spawn error:', e.message); process.exit(1); });
+server.on('exit', (code) => { if (code) { console.error(`server exited early (${code}):`, out.slice(-600)); process.exit(1); } });
 
 async function waitReady() {
   for (let i = 0; i < 60; i++) {
