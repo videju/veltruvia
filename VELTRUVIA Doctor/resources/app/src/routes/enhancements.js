@@ -202,6 +202,14 @@ enhanceRouter.post('/lab/ranges', authenticate, requireRole('admin'), validate(r
   res.json({ ok: true });
 }));
 
+enhanceRouter.delete('/lab/ranges/:id', authenticate, requireRole('admin'), asyncHandler(async (req, res) => {
+  const row = await db.prepare('SELECT biomarker FROM reference_ranges WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Range not found' });
+  await db.prepare('DELETE FROM reference_ranges WHERE id = ?').run(req.params.id);
+  writeAudit({ userId: req.auth.subjectId, action: 'range_deleted', category: 'clinical', details: { id: req.params.id, biomarker: row.biomarker } });
+  res.json({ ok: true });
+}));
+
 // ═══════════════════════════════════════════════════════ enhancements.js (continued)
 // ═══════════════════════════════════════════════════════════════════
 // Vitals & lab trends — reads existing stores, no duplication

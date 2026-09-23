@@ -1914,6 +1914,7 @@ async function renderSettingsPanel(){
       <label style="font-size:10px;display:flex;align-items:center;gap:4px;"><input type="checkbox" ${r.auto_archive?'checked':''}> Archive</label>
     </div>`).join('');
     document.getElementById('settings-breakglass-log').innerHTML='<div style="font-size:12px;color:var(--text-dim);padding:8px 0;">No break-the-glass events recorded.</div>';
+    rngRender();
   }catch(e){console.error('settings',e);}
 }
 async function addCustomRole(){
@@ -2376,4 +2377,50 @@ async function saveAvailability(){
   }catch(e){}
   showAvailMsg('✅ Schedule saved! Patients can book during these times.','success');
   renderAvailSlotPreview();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 🧪 REFERENCE RANGES ADMIN (v2.2) — /api/x/lab/ranges
+// ═══════════════════════════════════════════════════════════════
+let _rngCache=[];
+async function rngRender(){
+  const el=document.getElementById('settings-ranges-list');if(!el)return;
+  try{
+    const r=await api('/x/lab/ranges');
+    _rngCache=(r&&r.ranges)||[];
+    if(!_rngCache.length){el.innerHTML='<div style="font-size:12px;color:var(--text-dim);padding:8px 0;">No ranges yet — they seed automatically on first lab result.</div>';return;}
+    el.innerHTML=_rngCache.map(b=>{
+      const d=_rngCache.filter(x=>x.biomarker===b.biomarker);
+      if(d[0]!==b)return '';
+      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:6px;">
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px;">${esc(b.biomarker)} <span style="color:var(--text-dim);font-weight:400;">${esc(b.unit||'')}</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">${d.map(x=>
+          `<span style="display:inline-flex;align-items:center;gap:6px;font-size:10px;font-family:var(--mono);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:3px 9px;">
+            ${x.sex==='any'?'♂♀':x.sex==='male'?'♂':'♀'} ${x.min}–${x.max}${x.age_min?' · ≥'+x.age_min+'y':''}
+            <a href="#" style="color:var(--red);text-decoration:none;font-weight:700;" title="Delete" data-action="rngDel:${x.id}">×</a>
+          </span>`).join('')}</div></div>`;
+    }).join('');
+  }catch(e){el.innerHTML='<div style="font-size:12px;color:var(--text-dim);padding:8px 0;">Ranges unavailable offline.</div>';}
+}
+async function rngAdd(){
+  const bio=document.getElementById('rng-bio').value.trim();
+  const min=document.getElementById('rng-min').value, max=document.getElementById('rng-max').value;
+  if(!bio||min===''||max==='')return AppDialog.alert('Analyte, min and max are required.');
+  if(Number(min)>=Number(max))return AppDialog.alert('Min must be below Max.');
+  try{
+    await api('/x/lab/ranges',{method:'POST',body:JSON.stringify({
+      biomarker:bio, unit:document.getElementById('rng-unit').value.trim()||null,
+      sex:document.getElementById('rng-sex').value,
+      min:Number(min), max:Number(max),
+      ageMin:Number(document.getElementById('rng-agemin').value||0), ageMax:120, // API caps at 120 = "no upper bound"
+    })});
+    document.getElementById('rng-bio').value='';document.getElementById('rng-min').value='';document.getElementById('rng-max').value='';
+    flash('Range saved ✓'); rngRender();
+  }catch(e){AppDialog.alert('Save failed: '+e.message);}
+}
+async function rngDel(id){
+  try{
+    await api('/x/lab/ranges/'+encodeURIComponent(id),{method:'DELETE'});
+    flash('Range deleted'); rngRender();
+  }catch(e){AppDialog.alert('Delete failed: '+e.message);}
 }

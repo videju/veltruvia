@@ -85,6 +85,18 @@ prescriptionRouter.post('/', authenticate, requireRole('doctor', 'admin'),
     // If there are SEVERE warnings, return them but don't block (doctor decides)
     const severeWarnings = warnings.filter(w => w.severity === 'severe');
 
+    // 3. v2.2 pediatric/renal dosing safety (weight-based mg/kg, CrCl/eGFR)
+    try {
+      const { checkDosing } = await import('./dosing.js');
+      const dosingWarnings = await checkDosing({
+        patientMrn: rx.patientMrn, medication: rx.medication,
+        dosage: rx.dosage, frequency: rx.frequency, route: rx.route,
+      });
+      warnings.push(...dosingWarnings);
+    } catch (e) {
+      console.warn('[rx] dosing check failed:', e.message);
+    }
+
     const id = randomToken(16);
     await db.prepare(`
       INSERT INTO prescriptions (id, doctor_id, patient_mrn, medication, generic_name,

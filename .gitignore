@@ -128,3 +128,8 @@ keys.vault.bin
 .env.pre-rotation-*
 # in-app artifact mirror (large binaries, refreshed locally)
 VELTRUVIA Server/resources/app/public/downloads/
+
+# per-app download mirrors (large binaries, refreshed locally)
+VELTRUVIA Doctor/resources/app/public/downloads/
+VELTRUVIA Patient/resources/app/public/downloads/
+VELTRUVIA Lab/resources/app/public/downloads/

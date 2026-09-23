@@ -685,6 +685,12 @@ function buildRecordTabs(p){
       </div>
     </div>
     <div id="r-docs-list"></div>
+
+    <div class="rt-title" style="margin-top:18px;">🖼 Attachments (X-rays, lab PDFs, photos)</div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;">
+      <label class="btn btn-primary btn-sm" style="cursor:pointer;">📤 Upload Attachment <input type="file" id="r-att-file" style="display:none;" accept=".pdf,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv" data-action-change="rAttUpload"></label>
+    </div>
+    <div id="r-att-list" style="display:flex;gap:10px;flex-wrap:wrap;"></div>
   </div>
 
   <!-- ══ PATIENT OUTCOMES ══ -->
@@ -1524,3 +1530,59 @@ async function printLatestRx(mrn){
     printPrescription(latest.id);
   }catch(e){AppDialog.alert('Could not load prescriptions.');}
 }
+
+// ── v2.2 ATTACHMENTS UI — /api/x/attachments (streamed, integrity-checked) ──
+async function rAttUpload(){
+  if(!selectedMRN)return AppDialog.alert('Open a patient record first.');
+  const inp=document.getElementById('r-att-file');
+  const file=inp.files[0];if(!file)return;
+  if(file.size>10*1024*1024)return AppDialog.alert('File too large (max 10 MB).');
+  try{
+    // api() sends JSON — attachments need the raw bytes, so use fetch directly.
+    const res=await fetch('/api/x/attachments/'+encodeURIComponent(selectedMRN),{
+      method:'POST',credentials:'include',
+      headers:{'x-filename':file.name,'x-kind':'document','Content-Type':'application/octet-stream'},
+      body:file,
+    });
+    const j=await res.json();
+    if(!res.ok)throw new Error(j.error||('HTTP '+res.status));
+    inp.value='';
+    flash('Attachment uploaded ✓');
+    rAttLoad();
+  }catch(e){AppDialog.alert('Upload failed: '+e.message);}
+}
+async function rAttLoad(){
+  const el=document.getElementById('r-att-list');if(!el)return;
+  if(!selectedMRN){el.innerHTML='';return;}
+  try{
+    const r=await api('/x/attachments/'+selectedMRN);
+    const list=(r&&r.attachments)||[];
+    if(!list.length){el.innerHTML='<div class="empty-card" style="width:100%">No attachments yet. Upload X-rays, lab PDFs or photos.</div>';return;}
+    el.innerHTML=list.map(a=>{
+      const ext=(a.ext||'').toLowerCase();
+      const icon={'.pdf':'📕','.png':'🖼','.jpg':'🖼','.jpeg':'🖼','.gif':'🖼','.webp':'🖼','.bmp':'🖼','.txt':'📄','.csv':'📄','.json':'📄','.xml':'📄','.hl7':'📄'}[ext]||'📎';
+      const previewable=['.png','.jpg','.jpeg','.gif','.webp','.bmp'].includes(ext);
+      const thumb=previewable
+        ?`<img src="/api/x/attachments/${selectedMRN}/${a.id}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);cursor:pointer" data-action="rAttOpen:${a.id}">`
+        :`<div style="width:64px;height:64px;display:flex;align-items:center;justify-content:center;font-size:30px;background:var(--surface2);border-radius:8px;border:1px solid var(--border);cursor:pointer" data-action="rAttOpen:${a.id}">${icon}</div>`;
+      return `<div style="width:200px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px;">
+        <div style="display:flex;gap:10px;align-items:center;">${thumb}
+          <div style="min-width:0;flex:1;"><div style="font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escAttr(a.filename)}">${esc(a.filename)}</div>
+          <div style="font-size:10px;color:var(--text-dim);margin-top:2px;">${Math.round((a.bytes||0)/1024)} KB · ${(a.uploadedAt||'').slice(0,10)}</div></div>
+        </div></div>`;
+    }).join('');
+  }catch(e){el.innerHTML='<div class="empty-card" style="width:100%">Attachments unavailable offline.</div>';}
+}
+function rAttOpen(id){
+  window.open('/api/x/attachments/'+encodeURIComponent(selectedMRN)+'/'+id,'_blank');
+}
+// Patch record init to also load attachments.
+// rDocsLoad is defined in index-3-reports.js which loads AFTER this file —
+// defer the wrap to a timeout so the binding exists (a top-level const
+// read here would throw ReferenceError and abort this script's tail).
+setTimeout(function(){
+  if(typeof window.rDocsLoad==='function'){
+    const _rDocsLoad=window.rDocsLoad;
+    window.rDocsLoad=function(){_rDocsLoad();rAttLoad();};
+  }
+},0);

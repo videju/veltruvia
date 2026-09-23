@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { authenticate } from '../middleware/auth.js';
 import { validate, asyncHandler } from '../middleware/validate.js';
-import { getVapidPublicKey, saveSubscription, removeSubscription } from '../push.js';
+import { getVapidPublicKey, saveSubscription, removeSubscription, notifySubject } from '../push.js';
 
 export const pushRouter = Router();
 
@@ -29,4 +29,15 @@ pushRouter.post('/subscribe', authenticate, validate(subSchema), asyncHandler(as
 pushRouter.post('/unsubscribe', authenticate, validate(z.object({ endpoint: z.string().url() })), asyncHandler(async (req, res) => {
   await removeSubscription(req.valid.endpoint);
   res.json({ ok: true });
+}));
+
+// Self-test: sends a notification to the caller's own devices so any user
+// can verify push works end-to-end from their session (Settings → push check).
+pushRouter.post('/test', authenticate, asyncHandler(async (req, res) => {
+  const result = await notifySubject(req.auth.subjectId, {
+    title: 'VELTRUVIA push test',
+    body: 'Congratulations — notifications are working on this device. ' + new Date().toISOString(),
+    tag: 'push-test',
+  });
+  res.json(result); // { sent, failed } counts
 }));

@@ -594,6 +594,20 @@
           </div>
         </div>
         <div class="settings-section">
+          <h3>🧪 Lab Reference Ranges</h3>
+          <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Age/sex-aware normal bands used by delta-check &amp; result flagging. Edits are audit-logged.</div>
+          <div id="settings-ranges-list" style="max-height:280px;overflow:auto;"></div>
+          <div class="g2" style="margin-top:12px;">
+            <div class="fg" style="margin:0;"><label>Analyte</label><input id="rng-bio" placeholder="e.g. Creatinine"></div>
+            <div class="fg" style="margin:0;"><label>Unit</label><input id="rng-unit" placeholder="mg/dL"></div>
+            <div class="fg" style="margin:0;"><label>Sex</label><select id="rng-sex"><option value="any">Any</option><option value="male">Male</option><option value="female">Female</option></select></div>
+            <div class="fg" style="margin:0;"><label>Min</label><input type="number" id="rng-min" step="any"></div>
+            <div class="fg" style="margin:0;"><label>Max</label><input type="number" id="rng-max" step="any"></div>
+            <div class="fg" style="margin:0;"><label>Age ≥</label><input type="number" id="rng-agemin" value="0" min="0" max="120"></div>
+          </div>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px;" data-action="rngAdd">+ Add / Update Range</button>
+        </div>
+        <div class="settings-section">
           <h3>🔗 FHIR R4 Server</h3>
           <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Configure external FHIR server for data exchange.</div>
           <div class="g2">
