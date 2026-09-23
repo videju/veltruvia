@@ -1376,6 +1376,81 @@ syncRouter.post('/th/join-room', authenticate, requireRole('kv-patient'), patien
   res.json({ ok: true, roomCode, status: 'active' });
 }));
 
+// ── Waiting-room queue (v2.3) ───────────────────────────────────────
+// A patient "sits" in the waiting room by joining without marking the
+// session active; the doctor sees arrival order + wait times and admits.
+const QUEUE_REVERSE = { active: 'waiting', waiting: 'active' };
+
+syncRouter.post('/th/queue/join', authenticate, validate(thJoinRoomSchema), asyncHandler(async (req, res) => {
+  const { roomCode } = req.valid;
+  const rooms = readThRooms();
+  const room = rooms[roomCode];
+  if (!room || room.status === 'ended') return res.status(404).json({ error: 'Room not found' });
+  // Only the room's own patient (by subjectId suffix) or a kv-patient scoped
+  // to the room's MRN may queue.
+  const sid = String(req.auth?.subjectId || '');
+  if (req.auth?.role === 'kv-patient' && room.patientMrn !== sid.split('::').pop()) {
+    return res.status(403).json({ error: 'Not your video room' });
+  }
+  if (room.status === 'waiting') {
+    room.joinedAt = room.joinedAt || Date.now();
+    writeThRooms(rooms);
+  }
+  res.json({ ok: true, roomCode, status: room.status, position: 'waiting-room' });
+}));
+
+syncRouter.post('/th/queue/leave', authenticate, validate(thJoinRoomSchema), asyncHandler(async (req, res) => {
+  const { roomCode } = req.valid;
+  const rooms = readThRooms();
+  const room = rooms[roomCode];
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+  const sid = String(req.auth?.subjectId || '');
+  if (req.auth?.role === 'kv-patient' && room.patientMrn !== sid.split('::').pop()) {
+    return res.status(403).json({ error: 'Not your video room' });
+  }
+  if (room.status === 'waiting') delete room.joinedAt;
+  writeThRooms(rooms);
+  res.json({ ok: true });
+}));
+
+// Doctor: waiting-room list (arrival order) + admit the next patient
+syncRouter.get('/th/queue/:doctorId', authenticate, requireRole('doctor', 'admin'), asyncHandler(async (req, res) => {
+  const { doctorId } = req.params;
+  const rooms = readThRooms();
+  const now = Date.now();
+  const waiting = Object.entries(rooms)
+    .filter(([, r]) => r.doctorId === doctorId && r.status === 'waiting' && r.joinedAt)
+    .sort((a, b) => (a[1].joinedAt || 0) - (b[1].joinedAt || 0))
+    .map(([code, r], i) => ({
+      roomCode: code,
+      patientMrn: r.patientMrn,
+      position: i + 1,
+      waitedMinutes: Math.max(0, Math.round((now - (r.joinedAt || now)) / 60000)),
+      createdAt: r.createdAt,
+    }));
+  res.json({ ok: true, waiting });
+}));
+
+syncRouter.post('/th/queue/admit', authenticate, requireRole('doctor', 'admin'), validate(thJoinRoomSchema), asyncHandler(async (req, res) => {
+  const { roomCode } = req.valid;
+  const rooms = readThRooms();
+  const room = rooms[roomCode];
+  if (!room || room.status === 'ended') return res.status(404).json({ error: 'Room not found' });
+  if (room.doctorId !== req.auth.subjectId) return res.status(403).json({ error: 'Not your video room' });
+  room.status = 'active';
+  delete room.joinedAt;
+  room.admittedAt = Date.now();
+  writeThRooms(rooms);
+  writeAudit({ actorId: req.auth.subjectId, actorRole: 'doctor', action: 'telehealth.queue_admit', targetId: roomCode, ip: req.ip }).catch(() => {});
+  // Tell the patient they're being brought in
+  notifySubject(`${req.auth.subjectId}::${room.patientMrn}`, {
+    title: '📹 Your doctor is ready',
+    body: 'You are being brought into the video consultation now.',
+    url: '/patient.html',
+  }).catch(() => {});
+  res.json({ ok: true, roomCode, status: 'active' });
+}));
+
 // WebRTC Signaling: post a message (must be the room's doctor or its patient)
 syncRouter.post('/th/signal', authenticate, validate(thSignalSchema), asyncHandler(async (req, res) => {
   const { roomCode, type, data, sender } = req.valid;

@@ -2424,3 +2424,32 @@ async function rngDel(id){
     flash('Range deleted'); rngRender();
   }catch(e){AppDialog.alert('Delete failed: '+e.message);}
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 🪑 TELEHEALTH WAITING ROOM (v2.3)
+// ═══════════════════════════════════════════════════════════════
+async function loadThQueue(){
+  const el=document.getElementById('th-waiting-queue');if(!el)return;
+  try{
+    const r=await api('/sync/th/queue/'+(currentDoc?.docId||'unknown'));
+    const q=(r&&r.waiting)||[];
+    if(!q.length){el.innerHTML='<div class="empty-card">Waiting room is empty</div>';return}
+    el.innerHTML=q.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:10px;margin-bottom:8px;background:var(--surface)">
+      <div><div style="font-weight:700;font-size:13px">#${p.position} · Patient ${esc(p.patientMrn)}</div>
+      <div style="font-size:11px;color:var(--text-muted)">waiting ${p.waitedMinutes} min · room ${esc(p.roomCode)}</div></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-primary btn-sm" data-action="admitThQueue:${escAttr(p.roomCode)}">✅ Admit</button>
+        <button class="btn btn-ghost btn-sm" data-action="joinDoctorVideo:${escAttr(p.roomCode)}">📹 Join</button>
+      </div></div>`).join('');
+  }catch(e){el.innerHTML='<div class="empty-card">Queue unavailable offline.</div>'}
+}
+async function admitThQueue(roomCode){
+  try{
+    await api('/sync/th/queue/admit',{method:'POST',body:JSON.stringify({roomCode})});
+    flash('Patient admitted ✓');
+    loadThQueue(); loadActiveRooms();
+  }catch(e){AppDialog.alert('Admit failed: '+e.message)}
+}
+// refresh the queue whenever the telehealth panel opens
+const _origRenderTelehealthPanel=renderTelehealthPanel;
+renderTelehealthPanel=function(){_origRenderTelehealthPanel();loadThQueue();};

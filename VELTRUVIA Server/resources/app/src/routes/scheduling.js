@@ -199,6 +199,41 @@ scheduleRouter.post('/appointments', authenticate, requireRole('doctor', 'admin'
   })
 );
 
+// ── Doctor: calendar (.ics) export of upcoming appointments ────────
+scheduleRouter.get('/appointments.ics', authenticate, requireRole('doctor', 'admin'),
+  asyncHandler(async (req, res) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = await db.prepare(`
+      SELECT id, date, start_time, end_time, type, status, notes, patient_mrn
+      FROM appointments WHERE doctor_id = ? AND date >= ? AND status != 'cancelled'
+      ORDER BY date, start_time
+    `).all(req.auth.subjectId, today);
+
+    // RFC 5545 requires CRLF line endings and escaped commas/semicolons.
+    const esc = s => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+    const dt = (d, t) => d.replace(/-/g, '') + 'T' + (t || '09:00').replace(':', '') + '00';
+    let ics = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//VELTRUVIA//Appointments//EN', 'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH', 'X-WR-CALNAME:VELTRUVIA Clinic',
+    ];
+    for (const a of rows) {
+      ics.push(
+        'BEGIN:VEVENT',
+        `UID:${a.id}@veltruvia`,
+        `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').slice(0, 15)}Z`,
+        `DTSTART:${dt(a.date, a.start_time)}`, `DTEND:${dt(a.date, a.end_time || a.start_time)}`,
+        `SUMMARY:${esc(a.type || 'Appointment')} — MRN ${esc(a.patient_mrn)}`,
+        `DESCRIPTION:VELTRUVIA ${esc(a.type || '')} appointment (status: ${esc(a.status)})${a.notes ? '\\n' + esc(a.notes) : ''}`,
+        'END:VEVENT',
+      );
+    }
+    ics.push('END:VCALENDAR');
+    res.set('Content-Type', 'text/calendar; charset=utf-8');
+    res.set('Content-Disposition', 'attachment; filename="VELTRUVIA-Appointments.ics"');
+    res.send(ics.join('\r\n') + '\r\n');
+  })
+);
+
 // ── Doctor: update appointment status ──────────────────────────────
 const updateApptSchema = z.object({
   appointmentId: z.string().min(1),

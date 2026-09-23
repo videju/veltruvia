@@ -193,6 +193,7 @@
           <div style="display:flex;gap:6px;align-items:center;">
             <button class="btn btn-ghost btn-sm" data-action="apptWeekNav:-1;;renderApptCalendar">◀ Prev</button>
             <button class="btn btn-ghost btn-sm" data-action="apptWeekNav:0;;renderApptCalendar" style="font-weight:700">Today</button>
+            <a class="btn btn-ghost btn-sm" href="/api/schedule/appointments.ics" download style="text-decoration:none">📅 Export .ics</a>
             <button class="btn btn-ghost btn-sm" data-action="apptWeekNav:1;;renderApptCalendar">Next ▶</button>
           </div>
         </div>
@@ -355,6 +356,10 @@
           <div class="card">
             <div class="card-title" style="margin-bottom:12px">📋 Active Rooms</div>
             <div id="th-active-rooms"><div class="empty-card">No active video rooms</div></div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">🪑 Waiting Room <button class="btn btn-ghost btn-sm" data-action="loadThQueue">↻ Refresh</button></div>
+            <div id="th-waiting-queue"><div class="empty-card">Waiting room is empty</div></div>
           </div>
         </div>
       </div>

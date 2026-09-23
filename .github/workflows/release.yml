@@ -158,14 +158,122 @@ jobs:
           name: android
           path: dist/*
 
+  # ── SignPath code signing (v2.3 pre-wire) ─────────────────────────
+  # Dormant until 3 secrets exist: SIGNPATH_API_TOKEN, SIGNPATH_ORGANIZATION_ID,
+  # SIGNPATH_PROJECT_SLUG (signing policy is fixed: test-signing → release).
+  # When present: installers are signed via the SignPath GitHub Trusted Build
+  # System (key lives on SignPath's HSM — no cert file in the repo), the signed
+  # exes replace the unsigned ones, and the updater feeds are re-stamped so
+  # electron-updater's sha512 check still passes. SignPath requires the
+  # unsigned installer to be uploaded as a GitHub workflow artifact first.
+  sign:
+    needs: [desktop]
+    runs-on: ubuntu-latest
+    outputs:
+      signed: ${{ steps.gate.outputs.signed }}
+    steps:
+      - id: gate
+        shell: bash
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          if [ -n "$SIGNPATH_API_TOKEN" ]; then echo "signed=true" >> "$GITHUB_OUTPUT"; else echo "SIGNPATH_API_TOKEN not set — skipping code signing (installers stay self-signed)"; fi
+      - uses: actions/download-artifact@v4
+        if: steps.gate.outputs.signed == 'true'
+        with:
+          name: desktop
+          path: unsigned
+      - name: Upload unsigned Server installer (SignPath requirement)
+        id: upload-server-unsigned
+        if: steps.gate.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpath-server-unsigned
+          path: unsigned/VELTRUVIA-Server-Setup.exe
+      - name: Upload unsigned Doctor installer (SignPath requirement)
+        id: upload-doctor-unsigned
+        if: steps.gate.outputs.signed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpath-doctor-unsigned
+          path: unsigned/VELTRUVIA-Doctor-Setup.exe
+      - name: Sign Server installer via SignPath
+        if: steps.gate.outputs.signed == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: 'release-signing'
+          github-artifact-id: '${{ steps.upload-server-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1200
+          output-artifact-directory: 'signed/server'
+          parameters: 'version: "${{ github.ref_name }}"'
+      - name: Sign Doctor installer via SignPath
+        if: steps.gate.outputs.signed == 'true'
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ secrets.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ secrets.SIGNPATH_PROJECT_SLUG }}'
+          signing-policy-slug: 'release-signing'
+          github-artifact-id: '${{ steps.upload-doctor-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1200
+          output-artifact-directory: 'signed/doctor'
+          parameters: 'version: "${{ github.ref_name }}"'
+      - name: Stage signed installers
+        if: steps.gate.outputs.signed == 'true'
+        shell: bash
+        run: |
+          mkdir -p signed-dist
+          find signed -name '*.exe' -exec cp {} signed-dist/ \;
+          ls -la signed-dist
+      - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.signed == 'true'
+        with:
+          name: signed-desktop
+          path: signed-dist/*.exe
+
   publish:
-    needs: [desktop, android]
+    needs: [sign, android]
+    if: ${{ !cancelled() && needs.android.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: desktop
           path: dist
+      - uses: actions/download-artifact@v4
+        if: needs.sign.outputs.signed == 'true'
+        with:
+          name: signed-desktop
+          path: signed-overlay
+      - name: Replace installers + re-stamp updater feeds (signed)
+        if: needs.sign.outputs.signed == 'true'
+        shell: python
+        run: |
+          import hashlib, re, shutil, pathlib
+          d = pathlib.Path('dist')
+          # Signing changes the exe bytes → re-stamp the sha512/size in both
+          # electron-updater feeds, or auto-update would reject the signed exe.
+          for feed, exe in (('dist/latest.yml', 'VELTRUVIA-Server-Setup.exe'),
+                            ('dist/latest-doctor.yml', 'VELTRUVIA-Doctor-Setup.exe')):
+              src = pathlib.Path('signed-overlay') / exe
+              if not src.exists():
+                  print(f'WARNING: signed {exe} missing — feed {feed} left untouched'); continue
+              shutil.copyfile(src, d / exe)
+              data = (d / exe).read_bytes()
+              y = (pathlib.Path(feed)).read_text()
+              y = re.sub(r'sha512: \S+', 'sha512: ' + hashlib.sha512(data).hexdigest(), y, count=1)
+              y = re.sub(r'size: \d+', 'size: ' + str(len(data)), y, count=1)
+              pathlib.Path(feed).write_text(y)
+              print(f're-stamped {feed} for signed {exe}')
+          # Differential blockmaps no longer match the signed bytes — drop them
+          # (updater falls back to full download, which is always correct).
+          for bm in d.glob('*.blockmap'): bm.unlink()
+          print('removed stale blockmaps')
       - uses: actions/download-artifact@v4
         with:
           name: android

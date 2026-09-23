@@ -957,3 +957,56 @@ function checkMedReminders(){
 }
 setInterval(checkMedReminders,30000);
 setTimeout(setupMedReminders,4000);
+
+// ═══════════════════════════════════════════════════════════════
+// 🪑 PATIENT WAITING ROOM (v2.3) — join puts you in a queue; the
+// doctor admits you and the call starts automatically.
+// ═══════════════════════════════════════════════════════════════
+const _origPromptJoinVideo=promptJoinVideo;
+promptJoinVideo=async function(){
+  try{
+    const r=await api('/sync/th/my-rooms/'+(_docId||'unknown')+'/'+currentPat.mrn);
+    if(r.ok&&r.rooms&&r.rooms.length){
+      const room=r.rooms[0];
+      if(room.status==='active'){joinVideoCall(room.id);return}
+      try{await api('/sync/th/queue/join',{method:'POST',body:JSON.stringify({roomCode:room.id})})}catch(e){}
+      showWaitingRoom(room.id);
+      return;
+    }
+  }catch(e){}
+  const code=await AppDialog.prompt('Enter video room code from your doctor:');
+  if(code&&code.trim()){
+    const rc=code.trim().toUpperCase();
+    try{await api('/sync/th/queue/join',{method:'POST',body:JSON.stringify({roomCode:rc})})}catch(e){}
+    showWaitingRoom(rc);
+  }
+};
+function showWaitingRoom(roomCode){
+  const existing=document.getElementById('th-waiting-overlay');if(existing)existing.remove();
+  const ov=document.createElement('div');ov.id='th-waiting-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+  ov.innerHTML=`<div style="background:var(--surface,#fff);border-radius:16px;padding:28px;max-width:340px;text-align:center">
+    <div style="font-size:40px;margin-bottom:10px">🪑</div>
+    <div style="font-weight:800;font-size:16px;margin-bottom:6px">You're in the waiting room</div>
+    <div style="font-size:12px;color:var(--text-muted,#666);margin-bottom:14px">The doctor will bring you in shortly — keep this screen open.</div>
+    <div id="th-wait-spin" style="font-size:11px;color:var(--text-dim,#999);margin-bottom:14px">waiting…</div>
+    <button id="th-wait-cancel" style="padding:8px 18px;border-radius:10px;border:1px solid var(--border,#ddd);background:transparent;color:inherit;font-family:inherit;font-size:12px;cursor:pointer">Leave waiting room</button>
+  </div>`;
+  document.body.appendChild(ov);
+  const started=Date.now();
+  const poll=setInterval(async()=>{
+    try{
+      const r=await api('/sync/th/my-rooms/'+(_docId||'unknown')+'/'+currentPat.mrn);
+      const room=((r||{}).rooms||[]).find(x=>x.id===roomCode);
+      if(!room){clearInterval(poll);ov.remove();return}
+      if(room.status==='active'){clearInterval(poll);ov.remove();joinVideoCall(roomCode);return}
+      const mins=Math.floor((Date.now()-started)/60000);
+      const sp=document.getElementById('th-wait-spin');if(sp)sp.textContent='waiting · '+mins+' min';
+    }catch(e){}
+  },5000);
+  document.getElementById('th-wait-cancel').onclick=async()=>{
+    clearInterval(poll);
+    try{await api('/sync/th/queue/leave',{method:'POST',body:JSON.stringify({roomCode})})}catch(e){}
+    ov.remove();
+  };
+}

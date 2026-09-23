@@ -46,6 +46,85 @@ const RENAL_BANDS = [
     note: 'Nephrology input advised; many drugs contraindicated or needing major reduction.' },
 ];
 
+// ── Renal dose-adjustment suggestions (per drug, by CrCl band) ─────
+// Two bands: below 30, below 15 (mL/min). These are REFERENCE suggestions
+// surfaced to the prescriber — never applied automatically.
+const RENAL_ADJUSTMENTS = {
+  metformin: {
+    30: 'Do not initiate below eGFR 30; if already on it, halve the dose and recheck renal function every 3 months. Hold before iodine contrast.',
+    15: 'CONTRAINDICATED below eGFR 15 — discontinue metformin.',
+  },
+  gabapentin: {
+    30: 'Reduce total daily dose (CrCl 15–29: 300–600 mg/day) and titrate slowly.',
+    15: 'Give 300 mg or less daily; supplement post-dialysis if on HD.',
+  },
+  pregabalin: {
+    30: 'Reduce total daily dose (CrCl 15–29: 25–150 mg/day in 1–2 doses).',
+    15: '25–75 mg/day as a single dose; supplement after dialysis.',
+  },
+  enoxaparin: {
+    30: 'Reduce dose (prophylaxis 40 mg→20 mg or extend interval); anti-Xa monitoring advised.',
+    15: 'Therapeutic: 1 mg/kg once daily; prophylaxis q48h; anti-Xa monitoring advised.',
+  },
+  vancomycin: {
+    30: 'Extend interval and dose by AUC/trough-guided monitoring.',
+    15: 'Extended-interval dosing per levels; nephrology co-management.',
+  },
+  digoxin: {
+    30: 'Reduce dose and monitor serum levels (renal clearance dominates).',
+    15: 'Roughly half normal dose with level monitoring.',
+  },
+  lithium: {
+    30: 'Widen dosing interval and monitor levels closely (narrow therapeutic index).',
+    15: 'Avoid unless essential; check level before each dose increase.',
+  },
+  nitrofurantoin: {
+    30: 'Avoid — ineffective below eGFR 30 and raises toxicity risk.',
+    15: 'CONTRAINDICATED.',
+  },
+  colchicine: {
+    30: 'Reduce dose; avoid courses repeated within 2 weeks.',
+    15: 'HALF dose, max one course per 2 weeks; avoid with statins/clarithromycin.',
+  },
+  allopurinol: {
+    30: 'Start low (50–100 mg/day) and titrate to target urate.',
+    15: 'Start 50 mg/day; escalate cautiously with monitoring.',
+  },
+  rosuvastatin: {
+    30: 'Cap at 10 mg/day.',
+    15: 'Cap at 10 mg/day; avoid with cyclosporin.',
+  },
+};
+
+// ── Duplicate-therapy classes ──────────────────────────────────────
+// Drugs in the same class taken together double class effects (bleeding,
+// serotonin syndrome, sedation, rhabdo...). Same-drug matches are flagged
+// as outright duplicates.
+const DRUG_CLASSES = {
+  nsaid:          ['ibuprofen', 'naproxen', 'diclofenac', 'ketoprofen', 'ketorolac', 'meloxicam', 'celecoxib', 'indomethacin'],
+  antiplatelet:   ['aspirin', 'clopidogrel', 'ticagrelor', 'prasugrel', 'dipyridamole'],
+  anticoagulant:  ['warfarin', 'apixaban', 'rivaroxaban', 'dabigatran', 'edoxaban', 'enoxaparin', 'heparin'],
+  ssri:           ['sertraline', 'fluoxetine', 'citalopram', 'escitalopram', 'paroxetine', 'fluvoxamine'],
+  snri:           ['venlafaxine', 'duloxetine', 'desvenlafaxine'],
+  benzodiazepine: ['diazepam', 'lorazepam', 'alprazolam', 'clonazepam', 'temazepam', 'midazolam'],
+  opioid:         ['tramadol', 'codeine', 'morphine', 'oxycodone', 'hydromorphone', 'fentanyl', 'buprenorphine'],
+  ppi:            ['omeprazole', 'pantoprazole', 'lansoprazole', 'esomeprazole', 'rabeprazole'],
+  statin:         ['atorvastatin', 'simvastatin', 'rosuvastatin', 'pravastatin', 'lovastatin'],
+  acei:           ['lisinopril', 'enalapril', 'ramipril', 'captopril', 'perindopril'],
+  arb:            ['losartan', 'valsartan', 'telmisartan', 'candesartan', 'irbesartan'],
+  macrolide:      ['azithromycin', 'clarithromycin', 'erythromycin'],
+  penicillin:     ['amoxicillin', 'ampicillin', 'penicillin', 'flucloxacillin', 'co-amoxiclav'],
+  sulfonylurea:   ['gliclazide', 'glibenclamide', 'glimepiride', 'glipizide'],
+};
+
+function drugClassOf(name) {
+  const n = String(name || '').toLowerCase();
+  for (const [cls, list] of Object.entries(DRUG_CLASSES)) {
+    if (list.some(d => n.includes(d))) return cls;
+  }
+  return null;
+}
+
 function patientSexIs(p, letter) {
   const s = String(p?.sex || p?.gender || '').toLowerCase();
   return s.startsWith(letter);
@@ -226,6 +305,39 @@ export async function checkDosing({ patientMrn, medication, dosage, frequency, r
   }
   if (crclVal == null && ctx.eGfr != null) crclVal = ctx.eGfr; // fall back to lab-reported eGFR
 
+  // ── Duplicate-therapy detection (same drug, or same drug class) ──
+  try {
+    const actives = await db.prepare(
+      "SELECT medication, dosage, frequency FROM prescriptions WHERE patient_mrn = ? AND status = 'active'"
+    ).all(patientMrn);
+    const newLc = String(medication || '').toLowerCase();
+    const newCls = drugClassOf(medication);
+    let dupFlags = 0;
+    for (const rx of actives) {
+      if (dupFlags >= 4) break; // don't spam the prescriber
+      const rl = String(rx.medication || '').toLowerCase();
+      if (!rl) continue;
+      if (rl.includes(newLc) || newLc.includes(rl)) {
+        warnings.push({
+          type: 'duplicate',
+          severity: 'severe',
+          message: `⚠️ DUPLICATE THERAPY: patient already has ACTIVE ${rx.medication} (${rx.dosage || ''} ${rx.frequency || ''}). Review before adding ${medication}.`,
+        });
+        dupFlags++;
+      } else {
+        const rc = drugClassOf(rx.medication);
+        if (newCls && rc === newCls) {
+          warnings.push({
+            type: 'duplicate',
+            severity: 'warning',
+            message: `⚠️ SAME CLASS (${newCls.toUpperCase()}): patient is already on ${rx.medication}. Adding ${medication} doubles the class effects (bleeding/sedation/serotonin risk).`,
+          });
+          dupFlags++;
+        }
+      }
+    }
+  } catch { /* never block prescribing on this check */ }
+
   if (crclVal != null) {
     const band = RENAL_BANDS.find(b => crclVal >= b.min) || RENAL_BANDS[RENAL_BANDS.length - 1];
     if (band.severity) {
@@ -235,6 +347,20 @@ export async function checkDosing({ patientMrn, medication, dosage, frequency, r
         message: `⚠️ RENAL IMPAIRMENT: ${band.label} (eGFR/CrCl ${crclVal}) — check dosing of ${medication}`,
         recommendation: band.note,
       });
+    }
+    // Concrete dose-adjustment suggestion when the drug has one
+    const adjKey = findKey(RENAL_ADJUSTMENTS, medication);
+    if (adjKey) {
+      const band = crclVal < 15 ? 15 : 30;
+      const adj = RENAL_ADJUSTMENTS[adjKey][band];
+      if (adj) {
+        warnings.push({
+          type: 'dosing-adjustment',
+          severity: /CONTRAINDICATED|Avoid|discontinue/i.test(adj) ? 'severe' : 'warning',
+          message: `💡 RENAL DOSE ADJUSTMENT — ${medication} at eGFR/CrCl ${crclVal}: ${adj}`,
+          recommendation: 'Reference suggestion — confirm against the current formulary before prescribing.',
+        });
+      }
     }
     // Known high-risk renal drugs get an explicit flag even at mild stages
     const renalRisk = ['metformin', 'nsaid', 'ibuprofen', 'diclofenac', 'naproxen', 'gabapentin', 'pregabalin', 'vancomycin', 'gentamicin', 'amikacin', 'lithium', 'digoxin', 'nitrofurantoin'];
