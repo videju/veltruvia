@@ -1,43 +1,44 @@
-# VELTRUVIA — HTTPS on the Clinic LAN (prepared, optional)
+# VELTRUVIA — HTTPS on the Clinic LAN (LIVE since v2.0.5)
 
-Phone-to-server traffic on the clinic Wi-Fi is plain HTTP by default.
-A TLS setup is **already prepared** but **not enabled**:
+Phone-to-server traffic on the clinic Wi-Fi is now **encrypted**.
 
-- Certificate: `config/tls/veltruvia-lan.crt` (self-signed, CN=VELTRUVIA Clinic Server, SAN: localhost/127.0.0.1, valid 825 days)
-- Key: `config/tls/veltruvia-lan.key` (keep private — do not copy to phones or share folders)
+## Current state (already done)
 
-## How to enable
+- The Server runs a **second listener on port 3001** that speaks HTTPS
+  (TLS 1.2+) with the clinic certificate. Plain HTTP on :3000 stays on for
+  the desktop Doctor app and the cloud tunnel — nothing broke.
+- Certificate: `config/tls/veltruvia-lan.crt` (CN=VELTRUVIA Clinic Server,
+  valid to Dec 2028) — also downloadable from the server at
+  `http://<server-ip>:3000/certs/veltruvia-lan.crt`
+- Key: `config/tls/veltruvia-lan.key` (private — never copy to phones)
 
-1. Add two lines to `.env` (next to the VELTRUVIA folders):
+## Set up a phone (2 minutes each)
 
-```
-TLS_KEY=C:/Users/Sara/Desktop/ve/config/tls/veltruvia-lan.key
-TLS_CERT=C:/Users/Sara/Desktop/ve/config/tls/veltruvia-lan.crt
-```
+1. In any browser on the phone: `http://<server-ip>:3000/certs/veltruvia-lan.crt`
+2. Android: Settings → Security → **Install a certificate → CA certificate**
+   (accept the warning — it's your own clinic certificate)
+3. Open the VELTRUVIA app → ⚙ → **Scan QR** (point at the QR on the server's
+   download page) or type: `https://<server-ip>:3001`
+4. Save. The app now talks to the server encrypted.
 
-2. Restart the VELTRUVIA Server. It now speaks **https** on the LAN
-   (`https://<your-lan-ip>:3000`).
+The VELTRUVIA apps already trust user-installed CAs (network security
+config) — no app rebuild needed.
 
-3. On each phone: install the certificate.
-   - Copy `veltruvia-lan.crt` to the phone (or download it from the server).
-   - Android: Settings → Security → More security settings →
-     **Encryption & credentials → Install a certificate → CA certificate**.
-   - The VELTRUVIA apps already trust user-installed CAs (network security config).
+## Managing it
 
-4. Update the address in the app ⚙ screen to `https://…` and save.
+- **Disable:** remove `TLS_KEY`/`TLS_CERT` lines from `.env` (or set
+  `TLS_LAN_PORT=0`), restart the server.
+- **Change port:** set `TLS_LAN_PORT=<port>` in `.env`.
+- **Renew cert (Dec 2028):** regenerate with the command in `scripts/`
+  history or any OpenSSL self-signed guide, keep the same file paths.
+- The download page shows a green "encrypted HTTPS on port 3001" hint when
+  the sidecar is reachable.
 
 ## Trade-offs to know
 
-| | HTTP (today) | HTTPS (after enabling) |
-|---|---|---|
-| Setup | Zero | ~5 min per phone (one-time cert install) |
-| Traffic on Wi-Fi | Readable by anyone on the network | Encrypted |
-| Browser | Opens instantly | Shows a warning once per device until cert installed |
-
-**Remote access is unaffected**: the Cloudflare tunnel already provides real,
-trusted TLS from anywhere — this only hardens the in-clinic Wi-Fi leg.
-
-## If something breaks
-
-Remove the two `TLS_*` lines from `.env` and restart — the server falls back
-to plain HTTP exactly as before. Nothing else changes.
+- The certificate is self-signed: browsers will show a one-time warning if
+  you open `https://<ip>:3001` directly in a mobile browser — app traffic is
+  unaffected once the CA is installed.
+- Each phone must install the certificate once (step 1–2 above).
+- If you prefer simplicity over encryption, phones may keep using the plain
+  HTTP address — both work side by side.
