@@ -1052,7 +1052,7 @@ d.onclick=e=>{if(e.target===d)d.remove()};document.body.appendChild(d);
       _totpSecret=r.secret;
       document.getElementById('twofa-content').innerHTML=`
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)</div>
-        <div style="text-align:center;margin:12px 0;"><div style="background:#fff;display:inline-block;padding:12px;border-radius:8px;"><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(r.otpauthUrl)}" width="200" height="200" alt="QR Code"></div></div>
+        <div style="text-align:center;margin:12px 0;"><div style="background:#fff;display:inline-block;padding:12px;border-radius:8px;" id="twofa-qr-slot"></div></div>
         <div style="font-size:11px;color:var(--text-dim);margin:8px 0;">Or enter this key manually:</div>
         <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--mono);font-size:14px;text-align:center;letter-spacing:2px;margin-bottom:12px;">${r.secret}</div>
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Enter the 6-digit code from your app to confirm:</div>
@@ -1060,6 +1060,10 @@ d.onclick=e=>{if(e.target===d)d.remove()};document.body.appendChild(d);
           <input id="twofa-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" style="flex:1;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;font-family:var(--mono);text-align:center;letter-spacing:4px;">
           <button data-action="enable2FA" style="padding:10px 16px;background:var(--green);color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;">Enable</button>
         </div>`;
+    // 2FA QR rendered locally — the otpauth URL embeds the TOTP secret;
+    // sending it to a public QR service would leak the second factor.
+    { const slot = document.getElementById('twofa-qr-slot');
+      if (slot && window.localQr) slot.appendChild(localQr(r.otpauthUrl, { width: 200, alt: '2FA setup QR' })); }
     }
   }catch(e){
     if(e.message?.includes('already enabled')){

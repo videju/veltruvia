@@ -145,12 +145,42 @@ function debounce(fn, ms = 300) {
   return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
 }
 
+// ── Local QR encoding (VUtils.localQr) ───────────────────────
+// Renders any text/URL as a data-URL QR image using the vendored
+// qrcode-generator lib (js/vendor/qrcode-generator.js). Never contacts a
+// remote QR service — that would leak the address (or a 2FA secret!) to a
+// third party. Safe on every portal; CSP-clean (data: imgSrc is allowed).
+function localQr(text, opts) {
+  opts = opts || {};
+  var img = new Image();
+  img.alt = opts.alt || 'QR code';
+  var render = function () {
+    try {
+      var qr = window.qrcode(0, opts.ecc || 'M');
+      qr.addData(String(text));
+      qr.make();
+      img.src = qr.createDataURL(opts.cellSize || 4, opts.margin == null ? 2 : opts.margin);
+      if (opts.width) { img.width = opts.width; img.height = opts.width; }
+    } catch (e) {
+      img.src = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="30"><text x="4" y="20" font-size="11">QR unavailable</text></svg>');
+    }
+  };
+  if (window.qrcode) { render(); return img; }
+  var s = document.createElement('script');
+  s.src = 'js/vendor/qrcode-generator.js';
+  s.onload = render;
+  s.onerror = render; // render() still draws the fallback tile
+  document.head.appendChild(s);
+  return img;
+}
+
 // ── Export all to window ──────────────────────────────────────────
 if (typeof window !== 'undefined') {
   Object.assign(window, {
     esc, escAttr, api, formatDate, formatDateTime, formatTime, timeAgo,
     formatCurrency, formatNumber, formatPercent,
     $, $$, show, hide, toggle, setText, setHTML,
-    showToast, confirm2, debounce,
+    showToast, confirm2, debounce, localQr,
   });
 }

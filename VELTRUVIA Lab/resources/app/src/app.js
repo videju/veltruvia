@@ -77,14 +77,15 @@ app.use(helmet({
       // Fonts are self-hosted under /fonts/ (no third-party CDN dependency).
       styleSrc: ["'self'", "'unsafe-inline'"],
       fontSrc: ["'self'"],
-      // api.qrserver.com: renders the 2FA otpauth QR code and the
-      // download-page APK QR codes (as <img>, hence imgSrc too).
-      imgSrc: ["'self'", 'data:', 'blob:', 'https://api.qrserver.com'],
+      // All QR codes (2FA otpauth, download-page pairing) are rendered
+      // LOCALLY via the vendored qrcode-generator lib (js/vendor/) — a
+      // remote QR service would receive the server address and, worse,
+      // the TOTP secret. No third-party QR host in the CSP anymore.
+      imgSrc: ["'self'", 'data:', 'blob:'],
       // api.emailjs.com: the EmailJS fallback sender XHRs there — without
       // this entry the browser silently blocks every EmailJS send.
-      // api.qrserver.com: renders the 2FA otpauth QR code.
       // api.github.com: the download page's "latest release" badge.
-      connectSrc: ["'self'", 'https://api.emailjs.com', 'https://api.qrserver.com', 'https://api.github.com'],
+      connectSrc: ["'self'", 'https://api.emailjs.com', 'https://api.github.com'],
       manifestSrc: ["'self'"],
       workerSrc: ["'self'"],
     },
@@ -141,7 +142,7 @@ app.use((req, res, next) => {
   // Control referrer information leakage
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   // Feature policy - disable unnecessary browser features
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
   // HSTS with includeSubDomains and preload (for production)
   if (config.isProd) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');

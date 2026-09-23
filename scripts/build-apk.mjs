@@ -119,6 +119,21 @@ if (cap.status !== 0) {
   process.exit(cap.status ?? 1);
 }
 
+// WebView camera (QR pairing) needs the CAMERA permission — Capacitor's
+// generated projects don't declare it, and getUserMedia fails silently
+// without it. Idempotent.
+const manifestFile = join(androidDir, 'app', 'src', 'main', 'AndroidManifest.xml');
+if (existsSync(manifestFile)) {
+  let manifest = readFileSync(manifestFile, 'utf8');
+  if (!manifest.includes('android.permission.CAMERA')) {
+    manifest = manifest.replace(
+      '<uses-permission android:name="android.permission.INTERNET"',
+      '<uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.INTERNET"');
+    writeFileSync(manifestFile, manifest);
+    console.log('   ✅ CAMERA permission added to AndroidManifest (QR pairing)');
+  }
+}
+
 // Stamp the app version from package.json into the generated gradle config:
 // a fresh `cap add android` ships versionCode 1, which would be a *downgrade*
 // for phones already running an earlier release. Also ensures the release

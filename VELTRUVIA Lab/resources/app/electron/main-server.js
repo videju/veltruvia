@@ -88,7 +88,7 @@ function serveStatic(req, res) {
   // Express app applies Helmet to /api and its own static fallback, but
   // direct file responses here previously went out with no headers).
   const SEC = {
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://api.qrserver.com; connect-src 'self' https://api.emailjs.com https://api.qrserver.com https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://api.emailjs.com https://api.github.com; manifest-src 'self'; worker-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; object-src 'none'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Cross-Origin-Opener-Policy': 'same-origin',
@@ -297,6 +297,37 @@ app.whenReady().then(async () => {
     };
     loadWithWatchdog().then(ok => {
       if (ok) {
+        // ── LAN HTTPS sidecar (mirrors src/server.js) ────────────────
+        // Main listener stays plain HTTP so loopback consumers (desktop
+        // apps, the cloud tunnel) are unaffected. When TLS_KEY/TLS_CERT
+        // point at PEM files (loaded from the shared .env during Express
+        // load — that's why this lives AFTER loadWithWatchdog), a SECOND
+        // listener serves HTTPS on 0.0.0.0 so phone/LAN traffic is
+        // encrypted. TLS_LAN_PORT=0 disables.
+        try {
+          const tlsKeyPath = process.env.TLS_KEY;
+          const tlsCertPath = process.env.TLS_CERT;
+          const lanPort = parseInt(process.env.TLS_LAN_PORT || '3001', 10);
+          if (tlsKeyPath && tlsCertPath && lanPort > 0
+              && existsSync(tlsKeyPath) && existsSync(tlsCertPath)) {
+            Promise.all([import('node:https'), import('node:fs')])
+              .then(([{ createServer: createHttpsServer }, fsMod]) => {
+                const httpsSrv = createHttpsServer({
+                  key: fsMod.readFileSync(tlsKeyPath),
+                  cert: fsMod.readFileSync(tlsCertPath),
+                  minVersion: 'TLSv1.2',
+                }, serveStatic);
+                httpsSrv.on('error', (e) => console.warn('[server] LAN HTTPS sidecar error:', e.message));
+                httpsSrv.listen(lanPort, '0.0.0.0', () => {
+                  console.log(`[server] LAN HTTPS sidecar listening on 0.0.0.0:${lanPort}`);
+                });
+              })
+              .catch((e) => console.warn('[server] LAN HTTPS sidecar failed to start:', e.message));
+          }
+        } catch (e) {
+          console.warn('[server] LAN HTTPS sidecar failed to start:', e.message);
+        }
+
         // Attach the telehealth WebSocket signaling to the same HTTP server.
         // (src/server.js does this for node boots; without it here the exe's
         // WebRTC signaling endpoint silently 404s on upgrade.)

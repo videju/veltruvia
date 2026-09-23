@@ -132,10 +132,7 @@
 
   // ── Settings screen (native builds only) ─────────────────────────
   if (IS_NATIVE) {
-    function showSettings() {
-      var next = normalizeBase(window.prompt(
-        'VELTRUVIA Server address\n(e.g. https://emr.yourclinic.com)', state.base || ''));
-      if (next === null) return;
+    function applyServerUrl(next) {
       if (next !== state.base) {
         state.base = next;
         if (next) lsSet(URL_KEY, next); else { try { localStorage.removeItem(URL_KEY); } catch (e) {} }
@@ -143,6 +140,34 @@
         return;
       }
       window.alert('Server address unchanged: ' + (state.base || 'same-origin (none set)'));
+    }
+
+    function showSettings() {
+      // Native builds: offer camera QR pairing when the scanner is present —
+      // scan the “Connect a phone” QR on the server's download page and the
+      // address fills itself in. No typing, no transcription errors.
+      if (window.QRPairing && window.QRPairing.scanInto) {
+        var useScan = window.confirm(
+          'VELTRUVIA Server address\n\n' +
+          'OK    = Scan the QR code on the server\'s download page\n' +
+          'Cancel = Type the address manually');
+        if (useScan) {
+          window.QRPairing.scanInto().then(function (text) {
+            if (!text) return; // cancelled
+            var next = normalizeBase(text);
+            if (!next) {
+              window.alert('That QR is not a VELTRUVIA server address.\nUse the QR shown on the server\'s download page.');
+              return;
+            }
+            applyServerUrl(next);
+          });
+          return;
+        }
+      }
+      var typed = normalizeBase(window.prompt(
+        'VELTRUVIA Server address\n(e.g. https://emr.yourclinic.com)', state.base || ''));
+      if (typed === null) return;
+      applyServerUrl(typed);
     }
 
     function injectUI() {

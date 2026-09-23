@@ -32,33 +32,30 @@ startReminderScheduler();
 // chain in data/chain.json) so audited actions are recorded tamper-evidently.
 blockchain.connect().catch(err => console.warn('[blockchain] init failed:', err.message));
 
-// ── TLS / HTTPS support ───────────────────────────────────────────
-// If TLS_KEY and TLS_CERT env vars point to PEM files, the server
-// starts an HTTPS server instead of plain HTTP.  This is required
-// for production deployments that handle PHI over a network.
+// ── HTTP + optional LAN-HTTPS sidecar ──────────────────────────
+// Main listener stays plain HTTP so loopback consumers (desktop apps,
+// the cloud tunnel, local tools) are unaffected. When TLS_KEY/TLS_CERT
+// point at PEM files, a SECOND listener serves HTTPS on 0.0.0.0 so
+// phone/LAN traffic is encrypted. Set TLS_LAN_PORT=0 to disable.
 const tlsKeyPath = process.env.TLS_KEY;
 const tlsCertPath = process.env.TLS_CERT;
-let server;
+const haveTls = !!(tlsKeyPath && tlsCertPath && fs.existsSync(tlsKeyPath) && fs.existsSync(tlsCertPath));
+const server = http.createServer(app);
 
-if (tlsKeyPath && tlsCertPath && fs.existsSync(tlsKeyPath) && fs.existsSync(tlsCertPath)) {
-  const tlsOptions = {
-    key: fs.readFileSync(tlsKeyPath),
-    cert: fs.readFileSync(tlsCertPath),
-    // Modern TLS only
-    minVersion: 'TLSv1.2',
-    ciphers: [
-      'ECDHE-ECDSA-AES256-GCM-SHA384',
-      'ECDHE-RSA-AES256-GCM-SHA384',
-      'ECDHE-ECDSA-AES128-GCM-SHA256',
-      'ECDHE-RSA-AES128-GCM-SHA256',
-    ].join(':'),
-  };
-  server = https.createServer(tlsOptions, app);
-  console.log('  🔒 TLS enabled — serving over HTTPS');
-} else {
-  server = http.createServer(app);
-  if (config.isProd) {
-    console.warn('  ⚠️  No TLS_CERT/TLS_KEY set — running plain HTTP. NOT safe for PHI in production.');
+if (haveTls) {
+  const lanPort = parseInt(process.env.TLS_LAN_PORT || '3001', 10);
+  if (lanPort > 0) {
+    try {
+      https.createServer({
+        key: fs.readFileSync(tlsKeyPath),
+        cert: fs.readFileSync(tlsCertPath),
+        minVersion: 'TLSv1.2',
+      }, app).listen(lanPort, '0.0.0.0', () => {
+        console.log(`  🔒 LAN HTTPS sidecar listening on 0.0.0.0:${lanPort}`);
+      });
+    } catch (e) {
+      console.warn('  ⚠️  LAN HTTPS sidecar failed to start:', e.message);
+    }
   }
 }
 

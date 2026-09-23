@@ -3,7 +3,7 @@
 // checksums table. External file: the CSP is `script-src 'self'` and no
 // inline scripts or event handlers are allowed anywhere.
 //
-// External service: api.qrserver.com (already in the CSP connectSrc list,
+// All QR rendering is local (vendored qrcode-generator.js):
 // used by the 2FA setup page) renders the QR images — no extra dependency.
 // ═════════════════════════════════════════════════════════════════════
 (function () {
@@ -35,8 +35,7 @@
       if (!wrap) return;
       const img = wrap.querySelector('img[data-url]');
       if (img && !img.src) {
-        img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=8&data=' +
-          encodeURIComponent(img.getAttribute('data-url'));
+        drawLocalQr(img, img.getAttribute('data-url'));
       }
       wrap.hidden = !wrap.hidden;
     });
@@ -117,9 +116,24 @@
   var addr = document.getElementById('connect-address');
   if (addr) addr.textContent = origin;
   if (img) {
-    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=170x170&margin=4&data=' + encodeURIComponent(origin);
+    drawLocalQr(img, origin);
   }
   card.hidden = false;
+
+  // Encrypted-LAN hint: when the server's HTTPS sidecar answers, say so.
+  if (/^http:/.test(origin) && navigator.onLine !== false) {
+    try {
+      var httpsUrl = origin.replace(/^http:/, 'https:').replace(/:\d+$/, '') + ':3001/health';
+      fetch(httpsUrl, { mode: 'cors', signal: AbortSignal.timeout ? AbortSignal.timeout(1500) : undefined })
+        .then(function (r) {
+          if (r.ok) {
+            var hint = document.getElementById('connect-tls-hint');
+            if (hint) hint.hidden = false;
+          }
+        })
+        .catch(function () { /* plain-HTTP LAN only — hint stays hidden */ });
+    } catch (e) {}
+  }
   var btn = document.getElementById('copy-address');
   if (btn && addr) btn.addEventListener('click', function () {
     var done = function () { btn.textContent = 'Copied ✓'; setTimeout(function () { btn.textContent = 'Copy'; }, 2000); };
@@ -133,3 +147,29 @@
     }
   });
 })();
+
+// ── Local QR encoding ───────────────────────────────────
+// Never calls a remote QR service — the page would leak the server's
+// address to a third party on every load. Encodes with the vendored
+// qrcode-generator lib (local file, CSP-safe).
+function drawLocalQr(img, text) {
+  var hide = function () {
+    var wrap = img.closest('.connect-qr');
+    if (wrap) wrap.style.display = 'none';
+  };
+  var render = function () {
+    try {
+      var qr = window.qrcode(0, 'M'); // 0 = auto version
+      qr.addData(text);
+      qr.make();
+      img.src = qr.createDataURL(4, 0);
+      img.alt = 'QR code — ' + text;
+    } catch (e) { hide(); }
+  };
+  if (window.qrcode) { render(); return; }
+  var s = document.createElement('script');
+  s.src = 'js/vendor/qrcode-generator.js';
+  s.onload = render;
+  s.onerror = hide;
+  document.head.appendChild(s);
+}
