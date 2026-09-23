@@ -245,6 +245,18 @@ async function processLabResult(segments, msh, pid, req) {
         new Date().toISOString()
       );
       stored++;
+      // v2.1 delta-check on HL7-ingested results too
+      try {
+        const { computeDeltaCheck } = await import('./enhancements.js');
+        const dc = await computeDeltaCheck({ patientMrn: mrn, biomarker: obx.resultText || obx.resultCode, numericValue: obx.numericValue, reportDate: obx.dateObserved });
+        if (dc?.critical) {
+          notifySubject(ownerId || req.auth.subjectId, {
+            title: '🚨 Critical lab change',
+            body: dc.flags.map(f => f.message).join('; '),
+            url: '/',
+          }).catch(() => {});
+        }
+      } catch {}
     } catch (err) {
       console.error(`[hl7] Failed to store OBX:`, err.message);
     }

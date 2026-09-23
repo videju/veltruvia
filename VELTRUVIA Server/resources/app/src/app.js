@@ -36,6 +36,7 @@ import { clinicalFeaturesRouter, seedProtocols } from './routes/clinical-feature
 import { telehealthRouter, startTelehealthCleanup } from './routes/telehealth.js';
 import { emailOtpRouter } from './routes/email-otp.js';
 import billingNccnHipaaRouter from './routes/billing-nccn-hipaa.js';
+import { enhanceRouter } from './routes/enhancements.js';
 import { initPush } from './push.js';
 import { observability, metricsSnapshot } from './observability.js';
 import { initSentry, sentryRequestHandler, sentryErrorHandler } from './observability/sentry.js';
@@ -94,6 +95,7 @@ app.use(helmet({
 }));
 
 app.use(observability); // correlation IDs + structured logs + flow metrics
+app.use('/api/x/attachments', express.raw({ limit: '10mb', type: () => true })); // v2.1: raw file bytes
 app.use(express.json({ limit: '8mb' })); // lab file uploads (base64) can be large
 app.use(cookieParser());
 
@@ -249,6 +251,7 @@ app.use('/api/eprescribe', apiLimiter, eprescribingRouter);
 app.use('/api/fhir', apiLimiter, fhirRouter);
 app.use('/api/hipaa', apiLimiter, consentRouter);
 app.use('/api/breach', apiLimiter, breachRouter);
+app.use('/api/x', apiLimiter, enhanceRouter);
 
 // Billing router has its own auth middleware — mount under /api
 app.use('/api', apiLimiter, billingNccnHipaaRouter);

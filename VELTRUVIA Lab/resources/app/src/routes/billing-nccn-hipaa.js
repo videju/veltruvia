@@ -330,7 +330,16 @@ router.post('/biomarkers', asyncHandler(async (req, res) => {
     id, req.auth.subjectId, patientMrn, biomarker, result, numericValue || null, method || null, labName || null, reportDate || ts, significance, recommendedProtocols, notes || '', ts
   );
   writeBillingAudit({ userId: req.auth.subjectId, action: 'biomarker_added', category: 'clinical', details: { biomarker, result }, patientMrn });
-  res.json({ id, clinicalSignificance: significance, recommendedProtocols: JSON.parse(recommendedProtocols || '[]') });
+
+  // v2.1 delta-check + range flags: compare against this patient's most
+  // recent prior value and the age/sex reference bands.
+  let deltaCheck = null;
+  try {
+    const { computeDeltaCheck } = await import('./enhancements.js');
+    deltaCheck = await computeDeltaCheck({ patientMrn, biomarker, numericValue, reportDate });
+  } catch {}
+
+  res.json({ id, clinicalSignificance: significance, recommendedProtocols: JSON.parse(recommendedProtocols || '[]'), deltaCheck });
 }));
 
 router.get('/biomarkers/:patientMrn', asyncHandler(async (req, res) => {

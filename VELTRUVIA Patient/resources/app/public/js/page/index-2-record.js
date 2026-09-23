@@ -11,7 +11,7 @@ function openRecord(mrn){
   document.querySelectorAll('.rtab').forEach(t=>t.classList.remove('active'));
   document.querySelector('.rnav-item').classList.add('active');
   document.getElementById('rt-identity').classList.add('active');
-  setTimeout(()=>{rCalcBP();rCalcBMI();rCalcAge();rCalcSpO2();rCalcTemp();calcEQD2();renderAllergyTags();renderLabsTable();renderMedList();renderRecordLogs(mrn);renderRecordAppts(mrn);renderQuickSummary();checkDrugAllergyWarning();rCalcEGFR();renderMDTNotes(mrn);renderImagingReports(mrn);renderDrugInteractionBanner(mrn);renderRecordClinicalSupport(mrn);importLabSubs(mrn);rRxLoadAllergySummary();rRxLoadServerPrescriptions();rNotesLoad();rChemoLoad();rRefLoad();rDocsLoad();rOutLoad();loadNCCNTab(mrn);loadPatientBilling(mrn);},50);
+  setTimeout(()=>{rCalcBP();rCalcBMI();rCalcAge();rCalcSpO2();rCalcTemp();calcEQD2();renderAllergyTags();renderLabsTable();renderMedList();renderRecordLogs(mrn);loadTrendsTab(mrn);renderRecordAppts(mrn);renderQuickSummary();checkDrugAllergyWarning();rCalcEGFR();renderMDTNotes(mrn);renderImagingReports(mrn);renderDrugInteractionBanner(mrn);renderRecordClinicalSupport(mrn);importLabSubs(mrn);rRxLoadAllergySummary();rRxLoadServerPrescriptions();rNotesLoad();rChemoLoad();rRefLoad();rDocsLoad();rOutLoad();loadNCCNTab(mrn);loadPatientBilling(mrn);},50);
 }
 
 function buildRecordTabs(p){
@@ -304,7 +304,7 @@ function buildRecordTabs(p){
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;">
       <div>
         <div style="font-size:1.25rem;font-weight:800;color:var(--text);letter-spacing:-.5px;">💊 Prescriptions</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">E-prescribing & medication management</div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">E-prescribing & medication management · <a href="#" data-action="printDaySheet:@v:selectedMRN" style="color:var(--blue);font-size:12px;">🖨 Day sheet</a></div>
       </div>
       <div style="display:flex;gap:6px;">
         <button class="btn btn-ghost btn-sm" data-action="rRxLoadServerPrescriptions;;rRxLoadAllergySummary">🔄 Refresh</button>
@@ -601,6 +601,12 @@ function buildRecordTabs(p){
     <div id="r-imaging-list"></div>
   </div>
 
+  <!-- ══ TAB 10b: TRENDS (v2.1) ══ -->
+  <div id="rt-trends" class="rtab">
+    <div class="rt-title">Vitals &amp; Lab Trends</div>
+    <div id="r-trends-body" style="color:var(--text-muted);font-size:13px;">Loading trends…</div>
+  </div>
+
   <!-- ══ TAB 11: HEALTH LOGS ══ -->
   <div id="rt-logs" class="rtab">
     <div class="rt-title">Patient Health Logs</div>
@@ -625,6 +631,7 @@ function buildRecordTabs(p){
       <div style="display:flex;gap:6px;">
         <select id="r-note-type" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;background:var(--surface);color:var(--text);"><option value="progress">Progress Note</option><option value="soap">SOAP Note</option><option value="procedure">Procedure Note</option><option value="discharge">Discharge Summary</option><option value="consult">Consultation</option></select>
         <button class="btn btn-primary btn-sm" data-action="rNotesCreate">+ New Note</button>
+        <button class="btn btn-sm" id="r-dictate-btn" data-action="rToggleDictation" title="Voice-dictate into the SOAP fields (Chrome/Edge)">🎙 Dictate</button>
       </div>
     </div>
     <div id="r-notes-editor" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
@@ -731,7 +738,7 @@ function buildRecordTabs(p){
   <div id="rt-billing" class="rtab">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
       <div class="rt-title" style="margin:0;padding:0;border:none;">💰 Billing &amp; Insurance</div>
-      <button class="btn btn-primary btn-sm" data-action="createPatientInvoice">+ New Invoice</button>
+      <div style="display:flex;gap:6px;"><button class="btn btn-ghost btn-sm" data-action="printLatestInvoice:@v:selectedMRN">🖨 Print latest</button><button class="btn btn-primary btn-sm" data-action="createPatientInvoice">+ New Invoice</button></div>
     </div>
     <div style="display:flex;gap:4px;background:var(--surface2);padding:3px;border-radius:8px;margin-bottom:16px;width:fit-content;">
       <button class="btn btn-ghost btn-sm active" data-action="switchPatientBillingTab:invoices,@this">📄 Invoices</button>
@@ -1341,3 +1348,179 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='k'){
 
 // ── Mobile nav ──
 document.addEventListener('click',e=>{if(e.target.closest&&e.target.closest('.nav-item'))document.body.classList.remove('nav-open');});
+
+// ── v2.1 TRENDS TAB — sparklines from /api/x/trends ──
+let _trendsData=null;
+async function loadTrendsTab(mrn){
+  const body=document.getElementById('r-trends-body');if(!body)return;
+  body.textContent='Loading trends…';
+  try{
+    const [v,l]=await Promise.all([api('/x/trends/vitals/'+mrn),api('/x/trends/labs/'+mrn)]);
+    _trendsData={v:v||{},l:l||{}};
+    body.innerHTML=renderTrends(mrn);
+  }catch(e){body.innerHTML='<div class="empty-card">Trends unavailable offline.</div>';}
+}
+function _sparkSVG(vals,w,h,color){
+  if(!vals||vals.length<2)return '';
+  const min=Math.min(...vals),max=Math.max(...vals),span=(max-min)||1;
+  const pts=vals.map((v,i)=>[(i/(vals.length-1))*(w-6)+3,(h-4)-((v-min)/span)*(h-8)+2]);
+  const line=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const last=pts[pts.length-1];
+  const first=pts[0];
+  return `<svg width="${w}" height="${h}" style="display:block;overflow:visible"><path d="${line}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6" fill="${color}"/><circle cx="${first[0]}" cy="${first[1]}" r="2" fill="${color}" opacity=".45"/></svg>`;
+}
+function renderTrends(mrn){
+  const P=(_trendsData&&_trendsData.v&&_trendsData.v.points)||[];
+  const S=(_trendsData&&_trendsData.l&&_trendsData.l.series)||{};
+  const series=[
+    {key:'sys',label:'Systolic BP',unit:'mmHg',color:'#60a5fa',vals:P.map(p=>p.sys).filter(v=>v!=null)},
+    {key:'dia',label:'Diastolic BP',unit:'mmHg',color:'#38bdf8',vals:P.map(p=>p.dia).filter(v=>v!=null)},
+    {key:'pulse',label:'Pulse',unit:'bpm',color:'#f472b6',vals:P.map(p=>p.pulse).filter(v=>v!=null)},
+    {key:'spo2',label:'SpO₂',unit:'%',color:'#34d399',vals:P.map(p=>p.spo2).filter(v=>v!=null)},
+    {key:'temp',label:'Temperature',unit:'°C',color:'#fbbf24',vals:P.map(p=>p.temp).filter(v=>v!=null)},
+    {key:'weight',label:'Weight',unit:'kg',color:'#a78bfa',vals:P.map(p=>p.weight).filter(v=>v!=null)},
+    {key:'glucose',label:'Glucose',unit:'mg/dL',color:'#fb923c',vals:P.map(p=>p.glucose).filter(v=>v!=null)},
+  ];
+  const vCards=series.map(s=>{
+    const vals=s.vals.slice(-30);
+    const latest=vals[vals.length-1],prev=vals[vals.length-2];
+    const arrow=latest>prev?'▲':latest<prev?'▼':'—';
+    const ac=latest>prev?'var(--red)':latest<prev?'var(--green)':'var(--text-dim)';
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;min-width:170px;">
+      <div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-dim);">${s.label}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 6px;"><strong style="font-size:20px;font-family:var(--mono);">${latest!=null?latest:'—'}</strong><span style="font-size:11px;color:var(--text-dim);">${s.unit}</span><span style="font-size:12px;color:${ac};">${arrow}</span></div>
+      ${_sparkSVG(vals,150,34,s.color)}
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px;">${vals.length} reading${vals.length===1?'':'s'} · last: ${P.filter(p=>p[s.key]!=null).slice(-1)[0]?.date||''}</div>
+    </div>`;}).join('');
+  const labKeys=Object.keys(S).slice(0,8);
+  const lCards=labKeys.map(k=>{
+    const pts=(S[k]||[]).slice(-30);
+    const vals=pts.map(p=>p.value);
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;min-width:170px;">
+      <div style="font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-dim);">🧪 ${esc(k)}</div>
+      <div style="display:flex;align-items:baseline;gap:6px;margin:2px 0 6px;"><strong style="font-size:18px;font-family:var(--mono);">${vals[vals.length-1]??'—'}</strong></div>
+      ${_sparkSVG(vals,150,34,'#2dd4bf')}
+      <div style="font-size:10px;color:var(--text-dim);margin-top:4px;">${pts.length} result${pts.length===1?'':'s'}</div>
+    </div>`;}).join('');
+  if(!vCards.replace(/[\s\n]/g,'')&&!lCards)return '<div class="empty-card">No trend data yet — vitals come from daily logs, labs from results.</div>';
+  const sec=(t,h)=>h?`<div style="margin-bottom:16px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:8px;">${t}</div><div style="display:flex;gap:10px;flex-wrap:wrap;">${h}</div></div>`:'';
+  return sec('Vitals',vCards)+sec('Lab results',lCards);
+}
+
+// ── v2.1 VOICE DICTATION → SOAP fields (Web Speech API) ──
+let _recog=null,_dictTarget=null;
+function rToggleDictation(){
+  const btn=document.getElementById('r-dictate-btn');
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){AppDialog.alert('Voice dictation needs Chrome or Edge (Web Speech API).');return;}
+  if(_recog){try{_recog.stop();}catch(e){}_recog=null;btn.textContent='🎙 Dictate';btn.style.background='';return;}
+  // Target selector: which SOAP field is focused, else S
+  _dictTarget=document.activeElement&&['r-note-s','r-note-o','r-note-a','r-note-p'].includes(document.activeElement.id)?document.activeElement.id:'r-note-s';
+  _recog=new SR();
+  _recog.continuous=true;_recog.interimResults=false;_recog.lang='en-US';
+  _recog.onresult=e=>{
+    let t='';
+    for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)t+=e.results[i][0].transcript;}
+    if(!t)return;
+    const el=document.getElementById(_dictTarget);if(!el)return;
+    const sep=el.value&&!/\s$/.test(el.value)?' ':'';
+    el.value+=sep+t.charAt(0).toUpperCase()+t.slice(1)+'. ';
+  };
+  _recog.onend=()=>{_recog=null;const b=document.getElementById('r-dictate-btn');if(b){b.textContent='🎙 Dictate';b.style.background='';}};
+  _recog.onerror=ev=>{if(ev.error==='not-allowed')AppDialog.alert('Microphone permission denied — allow mic access to dictate.');};
+  try{_recog.start();btn.textContent='⏺ Stop';btn.style.background='var(--red)';btn.style.color='#fff';
+    AppDialog.alert('Dictating into '+(document.getElementById(_dictTarget)?.previousElementSibling?.textContent||'the S field')+'. Click any SOAP box to switch target; click Stop when done.');}
+  catch(e){AppDialog.alert('Could not start dictation: '+e.message);}
+}
+// Keep target synced when the user clicks into a SOAP field while recording
+document.addEventListener('focusin',e=>{if(_recog&&['r-note-s','r-note-o','r-note-a','r-note-p'].includes(e.target.id))_dictTarget=e.target.id;});
+
+// ── v2.1 PRINT / PDF — prescription, invoice, day-sheet ──
+// Opens a print-optimized popup (system Save-as-PDF works from any OS)
+function _printDoc(title,innerCss,innerHtml){
+  const w=window.open('','_blank','width=800,height=900');
+  if(!w){AppDialog.alert('Allow popups for this app to print.');return;}
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;color:#111;margin:32px;max-width:720px;}
+    h1{font-size:20px;margin:0 0 2px;}h2{font-size:15px;margin:18px 0 6px;border-bottom:1.5px solid #222;padding-bottom:4px;}
+    .hdr{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #0f4c81;padding-bottom:10px;margin-bottom:16px;}
+    .brand{font-size:22px;font-weight:800;color:#0f4c81;letter-spacing:-.5px;}
+    .muted{color:#666;font-size:11px;}
+    table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px;}
+    th{text-align:left;background:#f0f4f8;padding:6px 8px;border:1px solid #d8dee6;font-size:11px;text-transform:uppercase;letter-spacing:.5px;}
+    td{padding:6px 8px;border:1px solid #d8dee6;} .tot{font-weight:700;}
+    .sig{margin-top:48px;display:flex;justify-content:space-between;} .sig div{border-top:1px solid #333;padding-top:4px;font-size:12px;width:200px;text-align:center;}
+    @media print{.noprint{display:none}} ${innerCss||''}
+  </style></head><body>${innerHtml}</body></html>`);
+  w.document.close();setTimeout(()=>{try{w.focus();w.print();}catch(e){}},350);
+}
+function printPrescription(rxId){
+  api('/rx/'+rxId).then(rx=>{
+    if(!rx||rx.error){AppDialog.alert('Could not load prescription.');return;}
+    const r=rx.prescription||rx;
+    const meds=(r.medications||r.drugs||[]);
+    _printDoc('Prescription '+rxId,`
+      <table>
+    <thead><tr><th>Medication</th><th>Dose</th><th>Route</th><th>Frequency</th><th>Duration</th></tr></thead>
+    <tbody>${meds.map(m=>`<tr><td><strong>${esc(m.name||'')}</strong></td><td>${esc(m.dose||'')}</td><td>${esc(m.route||'oral')}</td><td>${esc(m.frequency||m.schedule||'')}</td><td>${esc(m.duration||'')}</td></tr>`).join('')}</tbody></table>`,
+    `<div class="hdr"><div><div class="brand">VELTRUVIA</div><div class="muted">Clinic Management System</div></div><div style="text-align:right;font-size:12px;"><strong>Rx #${esc(String(rxId).slice(0,10))}</strong><br>Date: ${new Date().toLocaleDateString()}</div></div>
+     <h1>Prescription</h1>
+     <p style="font-size:14px;"><strong>Patient:</strong> ${esc(r.patientName||'')} (MRN ${esc(r.patientMrn||'')}) &nbsp;·&nbsp; <strong>Prescriber:</strong> ${esc(r.doctorName||r.prescriber||'')}</p>
+     <h2>Medications</h2>
+     ${meds.length?'':'<p style="color:#900">No medication rows in this record.</p>'}
+     ${r.notes?`<h2>Notes</h2><p>${esc(r.notes)}</p>`:''}
+     <div class="sig"><div>Prescriber signature</div><div>Date</div></div>`);
+  }).catch(()=>AppDialog.alert('Could not load prescription.'));
+}
+function printInvoice(invId){
+  api('/billing/invoices/'+invId).then(r=>{
+    const inv=(r&&(r.invoice||r))||{};
+    const lines=(inv.items||inv.lines||[]);
+    const total=(inv.total??inv.amount??lines.reduce((s,l)=>s+(Number(l.amount||l.price||l.total)||0),0));
+    _printDoc('Invoice '+invId,'',
+    `<div class="hdr"><div><div class="brand">VELTRUVIA</div><div class="muted">Clinic Management System</div></div><div style="text-align:right;font-size:12px;"><strong>Invoice ${esc(inv.number||String(invId).slice(0,10))}</strong><br>Date: ${(inv.date||new Date().toISOString()).slice(0,10)}</div></div>
+     <h1>Invoice</h1>
+     <p style="font-size:14px;"><strong>Patient:</strong> ${esc(inv.patientName||'')} (MRN ${esc(inv.patientMrn||'')}) &nbsp;·&nbsp; <strong>Status:</strong> ${esc(inv.status||'—')}</p>
+     <table><thead><tr><th>Description</th><th style="text-align:right">Amount</th></tr></thead>
+     <tbody>${lines.map(l=>`<tr><td>${esc(l.description||l.name||l.code||'Item')}</td><td style="text-align:right">${esc(String(l.amount??l.price??l.total??''))}</td></tr>`).join('')||'<tr><td colspan="2">No line items stored.</td></tr>'}</tbody></table>
+     <p class="tot" style="text-align:right;font-size:16px;">Total: ${esc(String(total))}</p>
+     <div class="sig"><div>Authorized signature</div><div>Date</div></div>`);
+  }).catch(()=>AppDialog.alert('Could not load invoice.'));
+}
+function printDaySheet(mrn){
+  const P=(window._trendsData&&_trendsData.v&&_trendsData.v.points)||[];
+  const name=(document.getElementById('r-name')||{}).value||'';
+  const dx=(document.getElementById('r-dx')||{}).value||(document.getElementById('r-diagnosis')||{}).value||'';
+  const meds=(LS.get('meds_'+mrn)||[]).slice(0,10);
+  const appts=(LS.get('appts_'+mrn)||[]).slice(-5);
+  _printDoc('Day sheet '+mrn,'',
+  `<div class="hdr"><div><div class="brand">VELTRUVIA</div><div class="muted">Day Sheet — ${new Date().toLocaleDateString()}</div></div><div style="text-align:right;font-size:12px;">MRN: <strong>${esc(mrn)}</strong></div></div>
+   <h1>Day Sheet</h1><p><strong>Patient:</strong> ${esc(name)}<br><strong>Diagnosis:</strong> ${esc(dx)}</p>
+   <h2>Recent vitals</h2><table><thead><tr><th>Date</th><th>BP</th><th>Pulse</th><th>SpO₂</th><th>Temp</th><th>Weight</th></tr></thead>
+   <tbody>${P.slice(-8).reverse().map(p=>`<tr><td>${esc(p.date||'')}</td><td>${p.bp?esc(p.bp):'—'}</td><td>${p.pulse??'—'}</td><td>${p.spo2??'—'}</td><td>${p.temp??'—'}</td><td>${p.weight??'—'}</td></tr>`).join('')||'<tr><td colspan="6">No vitals recorded.</td></tr>'}</tbody></table>
+   ${meds.length?`<h2>Active medications</h2><ul style="font-size:13px;">${meds.map(m=>`<li>${esc(m.name||'')} ${esc(m.dose||'')}</li>`).join('')}</ul>`:''}
+   ${appts.length?`<h2>Appointments</h2><ul style="font-size:13px;">${appts.map(a=>`<li>${esc(a.date)} ${esc(a.time||'')} — ${esc(a.type||'')}</li>`).join('')}</ul>`:''}
+   <div class="sig"><div>Clinician signature</div><div>Date</div></div>`);
+}
+
+// v2.1: MRN-based print helpers (buttons pass the live selected MRN)
+async function printLatestInvoice(mrn){
+  mrn=String(mrn||'').toUpperCase();
+  try{
+    const r=await api('/billing/invoices');
+    const list=((r&&(r.invoices||r))||[]).filter(i=>String(i.patientMrn||i.mrn||'').toUpperCase()===mrn);
+    if(!list.length){AppDialog.alert('No invoices found for '+mrn);return;}
+    const latest=list.sort((a,b)=>String(b.date||b.createdAt||'').localeCompare(String(a.date||a.createdAt||'')))[0];
+    printInvoice(latest.id||latest.invoiceId);
+  }catch(e){AppDialog.alert('Could not load invoices.');}
+}
+async function printLatestRx(mrn){
+  mrn=String(mrn||'').toUpperCase();
+  try{
+    const r=await api('/rx/patient/'+mrn);
+    const list=((r&&(r.prescriptions||r))||[]);
+    if(!list.length){AppDialog.alert('No prescriptions found for '+mrn);return;}
+    const latest=list.sort((a,b)=>String(b.createdAt||b.date||'').localeCompare(String(a.createdAt||a.date||'')))[0];
+    printPrescription(latest.id);
+  }catch(e){AppDialog.alert('Could not load prescriptions.');}
+}

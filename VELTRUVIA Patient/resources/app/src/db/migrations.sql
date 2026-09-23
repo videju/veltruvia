@@ -594,3 +594,17 @@ INSERT OR IGNORE INTO data_retention_policies (id, name, data_type, retain_years
 ('ret-billing', 'Billing Records', 'billing', 7, 1, 0, datetime('now')),
 ('ret-audit', 'Audit Logs', 'audit', 6, 1, 0, datetime('now')),
 ('ret-phi', 'PHI Access Logs', 'phi_access', 6, 1, 0, datetime('now'));
+
+-- v2.1: Admin-editable lab reference ranges (age/sex aware)
+CREATE TABLE IF NOT EXISTS reference_ranges (
+  id TEXT PRIMARY KEY,
+  biomarker TEXT NOT NULL,
+  unit TEXT,
+  sex TEXT NOT NULL DEFAULT 'any',
+  min REAL NOT NULL,
+  max REAL NOT NULL,
+  age_min INTEGER NOT NULL DEFAULT 0,
+  age_max INTEGER NOT NULL DEFAULT 120,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_refrange_bio ON reference_ranges(lower(biomarker));

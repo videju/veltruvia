@@ -364,6 +364,7 @@ function renderHistory(){
   el.innerHTML=filtered.map(s=>`<div class="result-card" data-action="viewResult:${s.submittedAt}">
     <div class="result-header">
       <div class="result-test">📤 ${esc(s.test)}</div>
+      ${_abnClass(s.test,s.value)==='abn'?'<span class="badge" style="background:rgba(220,38,38,.12);color:var(--red)">⚠ Abnormal</span>':''}
       <span class="badge" style="background:rgba(5,150,105,.12);color:var(--green)">✓ Sent</span>
     </div>
     <div style="font-size:12px;color:var(--text-muted);margin-top:4px">
@@ -472,3 +473,39 @@ resetIdleTimer();
     obs.observe(document.body,{childList:true,subtree:true});
   }
 })();
+
+// ═══════════════════════════════════════════════════════════════
+// v2.1 INSTRUMENT STATUS + ABNORMAL/DELTA HIGHLIGHTING
+// ═══════════════════════════════════════════════════════════════
+async function loadInstrumentStatus(){
+  const el=document.getElementById('instrument-status-card');if(!el)return;
+  try{
+    const s=await api('/x/instrument-status');
+    const m=(s&&s.mllp)||{};
+    const on=!!m.enabled;
+    el.innerHTML=`<div style="display:flex;align-items:center;gap:12px">
+      <div style="font-size:26px">${on?'🟢':'⚪'}</div>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:13px">MLLP listener ${on?'active':'off'}${m.port?' · port '+esc(String(m.port)):''}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${s?s.resultsLast24h:0} results stored (24h)${m.connections?(' · '+esc(String(m.connections))+' instrument connection(s)'):''} · instruments send HL7 ORU^R01 to this port</div>
+      </div>
+    </div>`;
+  }catch(e){
+    el.innerHTML='<div class="empty-card" style="margin:0">Instrument feed unavailable offline.</div>';
+  }
+}
+// Patch initDashboard to also refresh the instrument card
+const _initDashboard=initDashboard;
+initDashboard=function(){_initDashboard();loadInstrumentStatus();};
+
+// Abnormal/delta coloring on history result cards — flags numeric values
+// outside the server's reference ranges or carrying big moves vs. the
+// patient's previous result (server returns deltaCheck on save; for
+// history we approximate client-side with simple band rules).
+function _abnClass(test,val){
+  const t=String(test||'').toLowerCase();
+  const v=Number(val);if(!Number.isFinite(v))return'';
+  const bands=[['hemoglobin',13.5,17.5],['hgb',13.5,17.5],['wbc',4000,11000],['platelets',150000,450000],['glucose',70,200],['creatinine',0.6,1.3],['potassium',3.5,5.1],['sodium',135,145],['hba1c',4,6.5],['alt',7,56],['ast',10,40],['crp',0,10]];
+  for(const [k,lo,hi] of bands){if(t.includes(k)){return v<lo||v>hi?'abn':'ok';}}
+  return'';
+}

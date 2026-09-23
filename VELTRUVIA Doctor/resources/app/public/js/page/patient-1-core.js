@@ -898,3 +898,62 @@ function renderLabInfo(){
     <div class="irow"><span class="ikey">Specialty</span><span class="ival">${esc(currentLab.specialty||'—')}</span></div>
   </div>`;
 }
+
+// ═══════════════════════════════════════════════════════════════
+// v2.1 MEDICATION REMINDERS — local alarms per active prescription
+// Parses the Rx frequency into daily times; fires Notification +
+// vibration + in-app toast while the app is open. Stored locally so
+// times survive restarts; user sets them once per medication.
+// ═══════════════════════════════════════════════════════════════
+const _REMIND_KEY='veltruvia_med_reminders';
+function _remindAll(){try{return JSON.parse(localStorage.getItem(_REMIND_KEY)||'{}')}catch(e){return{}}}
+function _remindSave(all){try{localStorage.setItem(_REMIND_KEY,JSON.stringify(all))}catch(e){}}
+function parseFreqTimes(freq){
+  const f=String(freq||'').toLowerCase();
+  if(/once|daily|1x|qday|od\b/.test(f))return['08:00'];
+  if(/twice|bid\b|2x/.test(f))return['08:00','20:00'];
+  if(/three|tid\b|3x/.test(f))return['08:00','14:00','20:00'];
+  if(/four|qid\b|4x/.test(f))return['08:00','12:00','16:00','20:00'];
+  if(/q(\d+)\s*h/.test(f)){const n=Number(f.match(/q(\d+)\s*h/)[1]);const out=[];for(let h=8;h<24;h+=n)out.push(String(h).padStart(2,'0')+':00');return out.length?out:['08:00'];}
+  if(/every\s+morning/.test(f))return['08:00'];
+  if(/every\s+night|bedtime|qhs/.test(f))return['21:00'];
+  return['08:00'];
+}
+function setupMedReminders(){
+  if(!('Notification' in window))return;
+  if(Notification.permission==='default')Notification.requestPermission();
+  api('/rx/my').then(r=>{
+    if(!r||!r.ok||!r.prescriptions)return;
+    const active=r.prescriptions.filter(p=>p.status==='active');
+    const all=_remindAll();
+    let added=0;
+    for(const rx of active){
+      if(all[rx.id])continue;
+      all[rx.id]={med:rx.medication,times:parseFreqTimes(rx.frequency),enabled:true};
+      added++;
+    }
+    // drop reminders for meds no longer active
+    for(const id of Object.keys(all)){if(!active.some(p=>String(p.id)===String(id))){delete all[id];}}
+    _remindSave(all);
+    if(added)showToast('⏰ '+added+' medication reminder'+(added===1?'':'s')+' scheduled');
+  }).catch(()=>{});
+}
+function checkMedReminders(){
+  const all=_remindAll();
+  const now=new Date();
+  const cur=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const today=now.toISOString().slice(0,10);
+  for(const [id,r] of Object.entries(all)){
+    if(!r.enabled||!r.times||!r.times.includes(cur))continue;
+    const firedKey='veltruvia_rem_'+id+'_'+today+'_'+cur;
+    if(localStorage.getItem(firedKey))continue;
+    try{localStorage.setItem(firedKey,'1')}catch(e){}
+    try{
+      if(Notification.permission==='granted')new Notification('💊 Time for '+r.med,{body:'Scheduled dose at '+cur,body_lang:'en'});
+    }catch(e){}
+    try{if(navigator.vibrate)navigator.vibrate([300,150,300]);}catch(e){}
+    try{showToast('💊 Time for '+r.med+' ('+cur+')');}catch(e){}
+  }
+}
+setInterval(checkMedReminders,30000);
+setTimeout(setupMedReminders,4000);
