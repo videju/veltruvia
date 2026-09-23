@@ -94,15 +94,18 @@ const DELTA_RULES = {
   ldh: { relPct: 30, abs: 80 },
 };
 
-export async function computeDeltaCheck({ patientMrn, biomarker, numericValue, reportDate }) {
+export async function computeDeltaCheck({ patientMrn, biomarker, numericValue, reportDate, excludeId }) {
   if (numericValue == null || Number.isNaN(Number(numericValue))) return null;
   const canon = canonName(biomarker);
+  // excludeId skips the row we JUST inserted (both call sites insert first).
+  // Never filter on created_at vs datetime('now') — SQLite's datetime format
+  // differs from our ISO strings and the comparison silently excludes all rows.
   const prior = await db.prepare(`
     SELECT numeric_value, report_date, result FROM biomarker_results
-    WHERE patient_mrn = ? AND created_at < COALESCE(?, datetime('now'))
+    WHERE patient_mrn = ? AND id != COALESCE(?, '')
       AND lower(biomarker) LIKE ?
     ORDER BY created_at DESC LIMIT 1
-  `).get(patientMrn, reportDate || null, `%${canon.slice(0, Math.max(4, canon.length - 1))}%`);
+  `).get(patientMrn, excludeId || '', `%${canon.slice(0, Math.max(4, canon.length - 1))}%`);
 
   if (!prior || prior.numeric_value == null) return null;
   const prev = Number(prior.numeric_value);
@@ -129,22 +132,28 @@ export async function computeDeltaCheck({ patientMrn, biomarker, numericValue, r
     }
   }
 
-  // Range check (age/sex aware when DOB is known)
+  // Range check (age/sex aware when DOB is known). Patient data may live in
+  // kv_store (encrypted) or the JSON patient store — decrypt failures or a
+  // missing record must NOT kill the whole range check, only disable the
+  // age/sex refinement.
   let rangeFlag = null;
   try {
-    const patRow = await db.prepare("SELECT v_enc FROM kv_store WHERE k = ?").get('pat_' + patientMrn);
     let dob = null, sex = 'any';
-    if (patRow?.v_enc) {
-      const pat = JSON.parse(decryptPHI(patRow.v_enc));
-      dob = pat.dob || pat.dateOfBirth || null;
-      sex = String(pat.sex || pat.gender || 'any').toLowerCase().startsWith('f') ? 'female'
-          : String(pat.sex || pat.gender || 'any').toLowerCase().startsWith('m') ? 'male' : 'any';
-    }
-    let age = 999;
+    try {
+      const patRow = await db.prepare("SELECT v_enc FROM kv_store WHERE k = ?").get('pat_' + patientMrn);
+      if (patRow?.v_enc) {
+        const pat = JSON.parse(decryptPHI(patRow.v_enc));
+        dob = pat.dob || pat.dateOfBirth || null;
+        sex = String(pat.sex || pat.gender || 'any').toLowerCase().startsWith('f') ? 'female'
+            : String(pat.sex || pat.gender || 'any').toLowerCase().startsWith('m') ? 'male' : 'any';
+      }
+    } catch { /* fall back to sex=any, no age filter */ }
+    let age = null;
     if (dob) age = Math.floor((Date.now() - new Date(dob).getTime()) / (365.25 * 86400000));
     const rows = await db.prepare(`SELECT * FROM reference_ranges WHERE lower(biomarker) = ?`).all(canon);
     const candidates = rows.filter(r =>
-      (r.sex === 'any' || r.sex === sex) && age >= (r.age_min ?? 0) && age <= (r.age_max ?? 999));
+      (r.sex === 'any' || r.sex === sex)
+      && (age == null || (age >= (r.age_min ?? 0) && age <= (r.age_max ?? 120))));
     const band = candidates.find(r => r.sex === sex) || candidates.find(r => r.sex === 'any');
     if (band && curr < band.min) {
       rangeFlag = { type: 'range', direction: 'low', min: band.min, max: band.max, unit: band.unit, severity: 'warning', message: `Below range (${band.min}–${band.max} ${band.unit || ''})` };
@@ -360,7 +369,13 @@ enhanceRouter.get('/attachments/:mrn/:id', authenticate, requireRole('doctor', '
   if (!_existsSync(p)) return res.status(404).json({ error: 'File missing' });
   const raw = _readFileSync(p, 'binary');
   const TEXT_EXT = new Set(['.txt', '.csv', '.json', '.xml', '.hl7']);
-  const body = TEXT_EXT.has(m.ext) ? Buffer.from(decryptPHI(raw), 'utf8') : Buffer.from(raw, 'binary');
+  let body;
+  try {
+    body = TEXT_EXT.has(m.ext) ? Buffer.from(decryptPHI(raw), 'utf8') : Buffer.from(raw, 'binary');
+  } catch (e) {
+    // Tampered ciphertext usually fails GCM auth here — surface as integrity error
+    return res.status(500).json({ error: 'Integrity check failed — file may be corrupted (decrypt error)' });
+  }
   const sha = createHash('sha256').update(body).digest('hex');
   if (sha !== m.sha256) {
     return res.status(500).json({ error: 'Integrity check failed — file may be corrupted', expected: m.sha256, got: sha });

@@ -336,7 +336,7 @@ router.post('/biomarkers', asyncHandler(async (req, res) => {
   let deltaCheck = null;
   try {
     const { computeDeltaCheck } = await import('./enhancements.js');
-    deltaCheck = await computeDeltaCheck({ patientMrn, biomarker, numericValue, reportDate });
+    deltaCheck = await computeDeltaCheck({ patientMrn, biomarker, numericValue, reportDate, excludeId: id });
   } catch {}
 
   res.json({ id, clinicalSignificance: significance, recommendedProtocols: JSON.parse(recommendedProtocols || '[]'), deltaCheck });

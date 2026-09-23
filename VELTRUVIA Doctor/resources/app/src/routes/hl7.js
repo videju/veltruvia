@@ -248,7 +248,7 @@ async function processLabResult(segments, msh, pid, req) {
       // v2.1 delta-check on HL7-ingested results too
       try {
         const { computeDeltaCheck } = await import('./enhancements.js');
-        const dc = await computeDeltaCheck({ patientMrn: mrn, biomarker: obx.resultText || obx.resultCode, numericValue: obx.numericValue, reportDate: obx.dateObserved });
+        const dc = await computeDeltaCheck({ patientMrn: mrn, biomarker: obx.resultText || obx.resultCode, numericValue: obx.numericValue, reportDate: obx.dateObserved, excludeId: id });
         if (dc?.critical) {
           notifySubject(ownerId || req.auth.subjectId, {
             title: '🚨 Critical lab change',

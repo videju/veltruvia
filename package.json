@@ -1,6 +1,6 @@
 {
   "name": "veltruvia-suite",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "private": true,
   "type": "module",
   "description": "VELTRUVIA neuro-oncology EMR desktop suite — quality gate, verification, and docs",
